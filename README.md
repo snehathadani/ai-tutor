@@ -3,6 +3,11 @@
 A real-time voice AI tutor for 12-year-olds learning probability, built with LiveKit,
 FastAPI, Redis, and React.
 
+**Verified environment:** backend requirements resolve and install on Python 3.11 (native
+conda dev) and Python 3.12 (`python:3.12-slim` Docker base). The compose stack was validated
+with `podman-compose` 1.0.6 because Docker is not installed on the build machine; the
+`docker-compose.yml` is standard syntax and should behave identically under real Docker.
+
 ## Architecture
 
 ```
@@ -35,7 +40,11 @@ Key invariant: only the agent writes Redis conversation state. The API is read-o
 
 ## Key decisions and tradeoffs
 
-1. **LiveKit Inference for STT/TTS** — Uses only `LIVEKIT_API_KEY`, so no extra Deepgram/Cartesia accounts are needed. Tradeoff: requires a LiveKit Cloud project and incurs Cloud inference usage.
+1. **LiveKit Inference for STT/TTS** — Uses only `LIVEKIT_API_KEY`, so no extra Deepgram/Cartesia accounts are needed. Verified model ids from `livekit-agents` 1.8.8's inference registry:
+   - STT: `deepgram/nova-3` (current documented default)
+   - TTS: `cartesia/sonic-3.5` with Cartesia's "Ellie" default voice id `79a125e8-cd45-4c13-8a67-188112f4dd22`
+   
+   Tradeoff: requires a LiveKit Cloud project and incurs Cloud inference usage.
 2. **DeepSeek via OpenAI plugin** — `livekit-plugins-openai` with `base_url=https://api.deepseek.com` is the simplest way to plug a DeepSeek model into `livekit-agents`. Tradeoff: it assumes OpenAI-compatible chat completion behavior.
 3. **Redis as the only state store** — Keeps the API stateless and makes the agent the single writer. Tradeoff: Redis becomes a single point of availability; if it is down the API still serves health but returns 503 for state reads.
 4. **Deterministic mastery in code** — The LLM can only call tools; actual level/streak math lives in `lib/state.py`. This prevents the model from hallucinating progress.
@@ -65,17 +74,17 @@ docker compose up --build
 
 The frontend is on http://localhost:3000, API on http://localhost:8000/api.
 
-> I verified the compose stack locally with `podman-compose` 1.0.6 because Docker was not installed on the build machine. The file is standard `docker-compose.yml`, so real Docker should produce the same result.
+> I verified the compose stack locally with `podman-compose` 1.0.6 because Docker was not installed on the build machine. The file is standard `docker-compose.yml`, so real Docker should produce the same result. Port `6379` was already in use by a host Redis service during validation, so the test `.env` used `REDIS_PORT=6380`; adjust the port to match your machine.
 
 ### Native dev
 
-Backend:
+Backend (Python 3.11 conda env used for validation; adjust for your own venv):
 
 ```bash
 cd backend
-uv venv .venv
+/home/rohit/miniconda3/envs/llm/bin/python -m venv .venv
 source .venv/bin/activate
-uv pip install -r requirements.txt -r requirements-dev.txt
+pip install -r requirements.txt -r requirements-dev.txt
 cp ../.env.example ../.env  # fill it in
 python -m uvicorn api.main:app --reload --port 8000
 ```
@@ -101,7 +110,7 @@ Tests:
 ```bash
 cd backend
 source .venv/bin/activate
-python -m pytest tests -v
+PYTHONPATH=. python -m pytest tests -v
 ```
 
 ## What is untested

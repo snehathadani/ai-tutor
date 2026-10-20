@@ -18,9 +18,9 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://redis:6379/0"
 
-    stt_model: str = "deepgram/nova-2-conversationalai"
+    stt_model: str = "deepgram/nova-3"
     tts_model: str = "cartesia/sonic-3.5"
-    tts_voice: str = "ellie"
+    tts_voice: str = "79a125e8-cd45-4c13-8a67-188112f4dd22"
 
     log_level: str = "INFO"
 
