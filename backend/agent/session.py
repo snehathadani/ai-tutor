@@ -88,11 +88,10 @@ async def run_session(ctx: lka.JobContext, settings: Settings) -> None:
         logger.info("Starting voice session %s", session_id)
         await session.start(agent=agent, room=ctx.room)
     finally:
-        if state._redis is not None:
-            try:
-                await state._redis.aclose()
-            except Exception as exc:
-                logger.warning("Error closing Redis in run_session: %s", exc)
+        try:
+            await state.close()
+        except Exception as exc:
+            logger.warning("Error closing Redis in run_session: %s", exc)
 
 
 async def finalize_session(ctx: lka.JobContext, settings: Settings) -> None:
@@ -114,8 +113,7 @@ async def finalize_session(ctx: lka.JobContext, settings: Settings) -> None:
         except Exception as exc:
             logger.error("Failed to finalize session %s: %s", session_id, exc)
     finally:
-        if state._redis is not None:
-            try:
-                await state._redis.aclose()
-            except Exception as exc:
-                logger.warning("Error closing Redis in finalize_session: %s", exc)
+        try:
+            await state.close()
+        except Exception as exc:
+            logger.warning("Error closing Redis in finalize_session: %s", exc)

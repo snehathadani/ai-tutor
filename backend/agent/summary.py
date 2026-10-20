@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from livekit.agents.llm import ChatContext
@@ -59,12 +60,12 @@ async def generate_session_summary(
             "summary": parsed.get("summary", ""),
             "strengths": parsed.get("strengths", []),
             "next_steps": parsed.get("next_steps", []),
-            "generated_ts": __import__("time").time(),
+            "generated_ts": time.time(),
         }
     except Exception:
         return {
             "summary": "We had a great probability practice session! Keep exploring chance, fractions, and sample spaces.",
             "strengths": ["Participated actively"],
             "next_steps": ["Try another probability problem next time."],
-            "generated_ts": __import__("time").time(),
+            "generated_ts": time.time(),
         }

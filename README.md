@@ -143,9 +143,9 @@ PYTHONPATH=. python -m pytest tests -v
 
 ## Agent dispatch
 
-The worker is registered **without an explicit `agent_name`** (`backend/agent/worker.py`). Verified against `livekit-agents` 1.8.8: an unnamed worker accepts any room job LiveKit offers, so every room the frontend joins gets an agent automatically.
+The worker registers with the explicit `agent_name` `probability-tutor` (`backend/agent/worker.py`). Every time `/api/token` mints a LiveKit JWT, the API also requests an explicit agent dispatch for that room via LiveKit's `agent_dispatch.create_dispatch` (`backend/api/main.py`). Verified against `livekit-agents` 1.8.8.
 
-Failure mode: the worker must be running **before** the participant joins the room. If the worker starts after the join, LiveKit will have no available worker to dispatch and the room will have no agent. For a multi-agent deployment you would instead register named workers and create explicit dispatches from the API.
+This means the worker does **not** need to be running before the participant joins. If the worker is down when a token is minted, the dispatch is still created; the frontend joins the room, waits up to ~20 seconds for an agent participant, and then shows a "Retry" button so the user can request another dispatch once the worker is available.
 
 ## What is untested
 

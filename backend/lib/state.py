@@ -101,6 +101,13 @@ class StateService:
                     await asyncio.sleep(delay)
         raise StateError(f"Could not connect to Redis after {retries} attempts: {last_exc}")
 
+    async def close(self) -> None:
+        if self._redis is not None:
+            try:
+                await self._redis.aclose()
+            finally:
+                self._redis = None
+
     def _ensure(self) -> redis.Redis:
         if self._redis is None:
             raise StateError("Redis client is not connected")

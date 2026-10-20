@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from agent.prompts import CONCEPT_BY_SLUG, CONCEPTS
-from lib.config import AGENT_NAME, Settings, get_settings, set_settings
+from lib.config import AGENT_NAME, Settings, get_settings
 from lib.state import StateError, StateService
 
 logger = logging.getLogger(__name__)
@@ -36,9 +36,9 @@ async def lifespan(app: FastAPI):
             logger.error("Redis not reachable at startup: %s", exc)
             logger.warning("API will serve health but state endpoints will return 503 until Redis is back.")
     yield
-    if state_service is not None and state_service._redis is not None:
+    if state_service is not None:
         try:
-            await state_service._redis.aclose()
+            await state_service.close()
         except Exception as exc:
             logger.warning("Error closing Redis: %s", exc)
 

@@ -15,8 +15,7 @@ async def state():
     svc = StateService(redis_client=FakeRedis(decode_responses=True))
     await svc.connect()
     yield svc
-    if svc._redis is not None:
-        await svc._redis.aclose()
+    await svc.close()
 
 
 class _FakeUserdata:
