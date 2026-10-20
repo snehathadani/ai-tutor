@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import timedelta
-from typing import Any
+from typing import Any, Optional
 
 import livekit.api as lkapi
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -11,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from agent.prompts import CONCEPT_BY_SLUG, CONCEPTS
-from lib.config import Settings, get_settings, set_settings
+from lib.config import AGENT_NAME, Settings, get_settings, set_settings
 from lib.state import StateError, StateService
 
 logger = logging.getLogger(__name__)
@@ -53,10 +54,47 @@ class TokenRequest(BaseModel):
 class TokenResponse(BaseModel):
     token: str
     url: str
+    dispatch_error: Optional[str] = None
+
+
+class DispatchRequest(BaseModel):
+    room: str
+
+
+class DispatchResponse(BaseModel):
+    dispatched: bool
+    error: Optional[str] = None
 
 
 def _get_settings() -> Settings:
     return get_settings()
+
+
+async def _dispatch_agent(room: str, settings: Settings) -> Optional[str]:
+    """Request an explicit agent dispatch for a room. Returns an error message
+    on failure, or None on success."""
+    try:
+        async with lkapi.LiveKitAPI(
+            settings.livekit_url,
+            settings.livekit_api_key,
+            settings.livekit_api_secret,
+        ) as api:
+            dispatch = await asyncio.wait_for(
+                api.agent_dispatch.create_dispatch(
+                    lkapi.CreateAgentDispatchRequest(room=room, agent_name=AGENT_NAME)
+                ),
+                timeout=5.0,
+            )
+            logger.info("Dispatched agent %s to room %s: dispatch_id=%s", AGENT_NAME, room, dispatch.id)
+            return None
+    except asyncio.TimeoutError:
+        msg = "Agent dispatch timed out"
+        logger.error(msg)
+        return msg
+    except Exception as exc:
+        msg = f"Agent dispatch failed: {exc}"
+        logger.error(msg)
+        return msg
 
 
 @app.exception_handler(StateError)
@@ -96,7 +134,19 @@ async def mint_token(
     except Exception as exc:
         logger.error("Failed to mint token: %s", exc)
         raise HTTPException(status_code=500, detail="Could not mint LiveKit token") from exc
-    return TokenResponse(token=token, url=settings.livekit_url)
+    dispatch_error = await _dispatch_agent(body.room, settings)
+    return TokenResponse(token=token, url=settings.livekit_url, dispatch_error=dispatch_error)
+
+
+@app.post("/api/dispatch", response_model=DispatchResponse)
+async def dispatch_agent(
+    body: DispatchRequest,
+    settings: Settings = Depends(_get_settings),
+) -> DispatchResponse:
+    error = await _dispatch_agent(body.room, settings)
+    if error:
+        return DispatchResponse(dispatched=False, error=error)
+    return DispatchResponse(dispatched=True)
 
 
 @app.get("/api/mastery")

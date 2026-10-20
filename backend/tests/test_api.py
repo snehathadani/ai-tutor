@@ -21,7 +21,10 @@ def client(state):
         livekit_url="wss://test.livekit.cloud",
         livekit_api_key="test-key",
         livekit_api_secret="test-secret",
-        deepseek_api_key="test-ds",
+        llm_provider="openai",
+        llm_base_url="https://api.test.example",
+        llm_api_key="test-llm",
+        llm_model="test-model",
         redis_url="redis://unused",
     )
     set_settings(settings)
@@ -43,8 +46,17 @@ def test_token(client):
     data = r.json()
     assert "token" in data
     assert data["url"] == "wss://test.livekit.cloud"
+    assert "dispatch_error" in data
     parts = data["token"].split(".")
     assert len(parts) == 3
+
+
+def test_dispatch_reports_failure_for_fake_credentials(client):
+    r = client.post("/api/dispatch", json={"room": "test-room"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["dispatched"] is False
+    assert data["error"]
 
 
 def test_mastery_and_sessions(client):

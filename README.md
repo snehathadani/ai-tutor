@@ -38,6 +38,32 @@ with `podman-compose` 1.0.6 because Docker is not installed on the build machine
 
 Key invariant: only the agent writes Redis conversation state. The API is read-only.
 
+## LLM provider configuration
+
+The tutor is provider-neutral. Set four env vars and swap models without touching code.
+
+| Variable | Values | Notes |
+|----------|--------|-------|
+| `LLM_PROVIDER` | `openai` (default), `anthropic` | Any other value fails at startup with a clear error. |
+| `LLM_BASE_URL` | e.g. `https://api.openai.com/v1`, `https://api.deepseek.com`, `https://api.anthropic.com` | Any OpenAI-compatible gateway works for `openai`. The Anthropic plugin also honours `base_url`. |
+| `LLM_API_KEY` | your key | For the chosen provider. |
+| `LLM_MODEL` | plain string | e.g. `gpt-4o-mini`, `deepseek-chat`, `claude-sonnet-4-5`. Passed through verbatim. |
+
+### Swap the model without touching code
+
+```bash
+# OpenAI
+LLM_PROVIDER=openai LLM_BASE_URL=https://api.openai.com/v1 LLM_MODEL=gpt-4o-mini
+
+# DeepSeek via the OpenAI-compatible plugin
+LLM_PROVIDER=openai LLM_BASE_URL=https://api.deepseek.com LLM_MODEL=deepseek-chat
+
+# Anthropic
+LLM_PROVIDER=anthropic LLM_BASE_URL=https://api.anthropic.com LLM_MODEL=claude-sonnet-4-5
+```
+
+Unknown `LLM_PROVIDER` values, or missing `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL`, cause a clear startup error from the worker preflight and exit with code 1.
+
 ## Key decisions and tradeoffs
 
 1. **LiveKit Inference for STT/TTS** — Uses only `LIVEKIT_API_KEY`, so no extra Deepgram/Cartesia accounts are needed. Verified model ids from `livekit-agents` 1.8.8's inference registry:
@@ -45,7 +71,7 @@ Key invariant: only the agent writes Redis conversation state. The API is read-o
    - TTS: `cartesia/sonic-3.5` with Cartesia's "Ellie" default voice id `79a125e8-cd45-4c13-8a67-188112f4dd22`
    
    Tradeoff: requires a LiveKit Cloud project and incurs Cloud inference usage.
-2. **DeepSeek via OpenAI plugin** — `livekit-plugins-openai` with `base_url=https://api.deepseek.com` is the simplest way to plug a DeepSeek model into `livekit-agents`. Tradeoff: it assumes OpenAI-compatible chat completion behavior.
+2. **Provider-neutral LLM wiring** — `livekit-plugins-openai` handles any OpenAI-compatible endpoint; `livekit-plugins-anthropic` handles Anthropic. The model string is passed verbatim, so new providers/models work by changing env vars. Tradeoff: we rely on each plugin's compatibility with the target API.
 3. **Redis as the only state store** — Keeps the API stateless and makes the agent the single writer. Tradeoff: Redis becomes a single point of availability; if it is down the API still serves health but returns 503 for state reads.
 4. **Deterministic mastery in code** — The LLM can only call tools; actual level/streak math lives in `lib/state.py`. This prevents the model from hallucinating progress.
 5. **Socratic system prompt** — The agent is instructed to hint and ask leading questions, never to blurt the final answer when the student should reason.
@@ -68,13 +94,13 @@ Today: one agent container and one API process handle one session per room in on
 
 ```bash
 cp .env.example .env
-# fill in LIVEKIT_*, DEEPSEEK_API_KEY, etc.
+# fill in LIVEKIT_*, LLM_*, etc.
 docker compose up --build
 ```
 
 The frontend is on http://localhost:3000, API on http://localhost:8000/api.
 
-> I verified the compose stack locally with `podman-compose` 1.0.6 because Docker was not installed on the build machine. The file is standard `docker-compose.yml`, so real Docker should produce the same result. Port `6379` was already in use by a host Redis service during validation, so the test `.env` used `REDIS_PORT=6380`; adjust the port to match your machine.
+> I verified the compose stack locally with `podman-compose` 1.0.6 because Docker was not installed on the build machine. The file is standard `docker-compose.yml`, so real Docker should produce the same result. Redis is **not** published to the host anymore; the api and agent reach it on the internal compose network. If you run native dev with a host Redis, bind it to a non-default port (e.g. `6380`) to avoid colliding with other services.
 
 ### Native dev
 
@@ -88,6 +114,8 @@ pip install -r requirements.txt -r requirements-dev.txt
 cp ../.env.example ../.env  # fill it in
 python -m uvicorn api.main:app --reload --port 8000
 ```
+
+If your local Redis is on a different host port, set e.g. `REDIS_URL=redis://127.0.0.1:6380/0`.
 
 Agent (in another shell):
 
@@ -113,10 +141,16 @@ source .venv/bin/activate
 PYTHONPATH=. python -m pytest tests -v
 ```
 
+## Agent dispatch
+
+The worker is registered **without an explicit `agent_name`** (`backend/agent/worker.py`). Verified against `livekit-agents` 1.8.8: an unnamed worker accepts any room job LiveKit offers, so every room the frontend joins gets an agent automatically.
+
+Failure mode: the worker must be running **before** the participant joins the room. If the worker starts after the join, LiveKit will have no available worker to dispatch and the room will have no agent. For a multi-agent deployment you would instead register named workers and create explicit dispatches from the API.
+
 ## What is untested
 
 - Real LiveKit Cloud audio rooms (no valid production credentials were available).
-- Actual DeepSeek voice responses (LLM calls require a real `DEEPSEEK_API_KEY`).
+- Actual provider voice responses (LLM calls require a real `LLM_API_KEY`).
 - Docker itself; only `podman-compose` was available for compose validation.
 
 ## Security note

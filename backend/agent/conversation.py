@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import livekit.agents as lka
 from livekit.agents.llm import ChatContext
 
@@ -10,11 +12,16 @@ from agent.tools import get_mastery, get_problem, grade_answer, record_observati
 from lib.config import Settings
 
 
-def build_agent(settings: Settings, session_ctx: SessionContext, chat_ctx: ChatContext) -> lka.Agent:
+def build_agent(
+    settings: Settings,
+    session_ctx: SessionContext,
+    chat_ctx: ChatContext,
+    mastery: dict[str, dict[str, Any]] | None = None,
+) -> lka.Agent:
     llm, stt, tts, vad = build_voice_stack(settings)
     tools = [get_problem, grade_answer, record_observation, get_mastery]
 
-    instructions = SYSTEM_INSTRUCTIONS + "\n" + build_dynamic_prompt({})
+    instructions = SYSTEM_INSTRUCTIONS + "\n" + build_dynamic_prompt(mastery or {})
 
     return lka.Agent(
         instructions=instructions,

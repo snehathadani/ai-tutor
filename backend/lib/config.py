@@ -1,6 +1,10 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+VALID_LLM_PROVIDERS = ("openai", "anthropic")
+AGENT_NAME = "probability-tutor"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -8,13 +12,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    livekit_url: str
-    livekit_api_key: str
-    livekit_api_secret: str
+    livekit_url: str = ""
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
 
-    deepseek_api_key: str
-    deepseek_model: str = "deepseek-v4-pro"
-    deepseek_base_url: str = "https://api.deepseek.com"
+    llm_provider: str = "openai"
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = ""
 
     redis_url: str = "redis://redis:6379/0"
 

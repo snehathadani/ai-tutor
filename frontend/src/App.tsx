@@ -28,6 +28,8 @@ interface Summary {
   next_steps: string[];
 }
 
+const TUTOR_WAKEUP_MS = 20000;
+
 export default function App() {
   const [room, setRoom] = useState<Room | null>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.Disconnected);
@@ -36,7 +38,11 @@ export default function App() {
   const [muted, setMuted] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [agentJoined, setAgentJoined] = useState(false);
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [lastDispatchError, setLastDispatchError] = useState<string | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const greetedRef = useRef(false);
 
   const addTurn = useCallback((role: 'user' | 'assistant', text: string) => {
     setTurns((prev: Turn[]) => [
@@ -45,8 +51,34 @@ export default function App() {
     ]);
   }, []);
 
+  const requestDispatch = useCallback(async (roomName: string) => {
+    try {
+      const res = await fetch('/api/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: roomName }),
+      });
+      const data = (await res.json()) as { dispatched: boolean; error?: string };
+      if (!res.ok || !data.dispatched) {
+        const err = data.error || 'Dispatch request failed';
+        setLastDispatchError(err);
+        return err;
+      }
+      setLastDispatchError(null);
+      return null;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setLastDispatchError(msg);
+      return msg;
+    }
+  }, []);
+
   const handleConnect = useCallback(async (roomName: string, identity: string) => {
     setError(null);
+    setAgentError(null);
+    setAgentJoined(false);
+    setLastDispatchError(null);
+    greetedRef.current = false;
     setSummary(null);
     setTurns([]);
     setSessionId(roomName);
@@ -60,18 +92,28 @@ export default function App() {
       if (!res.ok) {
         throw new Error(`Could not get token: ${res.status}`);
       }
-      const { token, url } = (await res.json()) as { token: string; url: string };
+      const { token, url, dispatch_error } = (await res.json()) as {
+        token: string;
+        url: string;
+        dispatch_error?: string;
+      };
+      if (dispatch_error) {
+        setLastDispatchError(dispatch_error);
+      }
 
       const newRoom = new Room({ adaptiveStream: true });
 
       newRoom.on(RoomEvent.Connected, () => {
         setConnectionState(ConnectionState.Connected);
-        addTurn('assistant', 'Hi! I am your probability tutor. What would you like to work on?');
       });
 
       newRoom.on(RoomEvent.Disconnected, () => {
         setConnectionState(ConnectionState.Disconnected);
         setRoom(null);
+        setAgentJoined(false);
+        setAgentError(null);
+        setLastDispatchError(null);
+        greetedRef.current = false;
         addTurn('assistant', 'Session ended.');
       });
 
@@ -106,6 +148,52 @@ export default function App() {
       setConnectionState(ConnectionState.Disconnected);
     }
   }, [addTurn]);
+
+  useEffect(() => {
+    if (!room) {
+      setAgentJoined(false);
+      return;
+    }
+    const checkAgent = () => {
+      const joined = Array.from(room.remoteParticipants.values()).some((p) => p.isAgent);
+      setAgentJoined(joined);
+      if (joined) setAgentError(null);
+    };
+    checkAgent();
+    room.on(RoomEvent.ParticipantConnected, checkAgent);
+    room.on(RoomEvent.ParticipantDisconnected, checkAgent);
+    return () => {
+      room.off(RoomEvent.ParticipantConnected, checkAgent);
+      room.off(RoomEvent.ParticipantDisconnected, checkAgent);
+    };
+  }, [room]);
+
+  useEffect(() => {
+    if (!room || agentJoined || agentError) return;
+    const timer = setTimeout(() => {
+      const extra = lastDispatchError ? ` Server dispatch error: ${lastDispatchError}` : '';
+      setAgentError(
+        `Your tutor is taking longer than expected to join.${extra} Try the retry button or check that the agent service is running.`
+      );
+    }, TUTOR_WAKEUP_MS);
+    return () => clearTimeout(timer);
+  }, [room, agentJoined, agentError, lastDispatchError]);
+
+  useEffect(() => {
+    if (agentJoined && !greetedRef.current) {
+      greetedRef.current = true;
+      addTurn('assistant', 'Hi! I am your probability tutor. What would you like to work on?');
+    }
+  }, [agentJoined, addTurn]);
+
+  const retryDispatch = useCallback(async () => {
+    if (!room) return;
+    setAgentError(null);
+    const err = await requestDispatch(room.name);
+    if (err) {
+      setAgentError(`Retry failed: ${err}`);
+    }
+  }, [room, requestDispatch]);
 
   const toggleMute = useCallback(async () => {
     if (!room) return;
@@ -155,7 +243,34 @@ export default function App() {
         disabled={connectionState === ConnectionState.Connecting || !!room}
       />
 
-      {room && (
+      {room && !agentJoined && !agentError && (
+        <div className="card">
+          <div className="form-row" style={{ justifyContent: 'space-between' }}>
+            <span className="status">Waking up your tutor…</span>
+            <button type="button" className="danger" onClick={disconnect}>
+              Disconnect
+            </button>
+          </div>
+        </div>
+      )}
+
+      {room && agentError && (
+        <div className="card error">
+          <div className="form-row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>{agentError}</span>
+            <div className="form-row">
+              <button type="button" className="secondary" onClick={retryDispatch}>
+                Retry
+              </button>
+              <button type="button" className="danger" onClick={disconnect}>
+                Disconnect
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {room && agentJoined && (
         <VoicePanel
           state={connectionState}
           muted={muted}

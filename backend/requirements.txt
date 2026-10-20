@@ -31,6 +31,7 @@ livekit-api==1.2.2
 livekit-blingfire==1.2.0
 livekit-local-inference==0.2.7
 livekit-plugins-openai==1.8.8
+livekit-plugins-anthropic==1.8.8
 livekit-protocol==1.1.27
 markdown-it-py==4.2.0
 mdurl==0.1.2

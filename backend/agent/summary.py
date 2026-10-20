@@ -4,8 +4,8 @@ import json
 from typing import Any
 
 from livekit.agents.llm import ChatContext
-from livekit.plugins.openai import LLM as OpenAILLM
 
+from agent.llm import build_llm
 from lib.config import Settings
 
 
@@ -17,13 +17,7 @@ async def generate_session_summary(
     if not transcript:
         return None
 
-    llm = OpenAILLM(
-        model=settings.deepseek_model,
-        base_url=settings.deepseek_base_url,
-        api_key=settings.deepseek_api_key,
-        temperature=0.4,
-        max_completion_tokens=256,
-    )
+    llm = build_llm(settings, temperature=0.4)
 
     transcript_text = "\n".join(
         f"{turn['role']}: {turn['text']}" for turn in transcript[-50:]

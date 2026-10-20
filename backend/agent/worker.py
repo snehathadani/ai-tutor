@@ -8,16 +8,27 @@ import livekit.agents as lka
 import livekit.api as lkapi
 
 from agent.session import finalize_session, run_session
-from lib.config import Settings, get_settings
+from lib.config import AGENT_NAME, VALID_LLM_PROVIDERS, Settings, get_settings
 
 
 def _preflight(settings: Settings) -> None:
+    provider = settings.llm_provider.lower()
+    if provider not in VALID_LLM_PROVIDERS:
+        print(
+            "ERROR: LLM_PROVIDER must be one of: "
+            f"{', '.join(VALID_LLM_PROVIDERS)}. Got '{settings.llm_provider}'.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     missing: list[str] = []
     for name, value in (
         ("LIVEKIT_URL", settings.livekit_url),
         ("LIVEKIT_API_KEY", settings.livekit_api_key),
         ("LIVEKIT_API_SECRET", settings.livekit_api_secret),
-        ("DEEPSEEK_API_KEY", settings.deepseek_api_key),
+        ("LLM_BASE_URL", settings.llm_base_url),
+        ("LLM_API_KEY", settings.llm_api_key),
+        ("LLM_MODEL", settings.llm_model),
         ("REDIS_URL", settings.redis_url),
     ):
         if not value:
@@ -25,7 +36,7 @@ def _preflight(settings: Settings) -> None:
 
     if missing:
         print(
-            "ERROR: Missing or invalid LiveKit/DeepSeek credentials:\n  - "
+            "ERROR: Missing or invalid LiveKit/LLM credentials:\n  - "
             + "\n  - ".join(missing)
             + "\nPlease copy .env.example to .env and fill in the real values.",
             file=sys.stderr,
@@ -79,9 +90,13 @@ def main() -> None:
     _preflight(settings)
 
     server = lka.AgentServer(max_retry=3)
+    # Register this worker under an explicit agent name. The API will request
+    # an agent dispatch for the room after minting the token, so the worker
+    # does not need to be running before the participant joins.
+    # Verified against livekit-agents 1.8.8.
     server.rtc_session(
         entrypoint,
-        agent_name="probability-tutor",
+        agent_name=AGENT_NAME,
         on_session_end=on_session_end,
     )
 

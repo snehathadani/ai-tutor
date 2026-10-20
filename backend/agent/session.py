@@ -30,73 +30,92 @@ async def run_session(ctx: lka.JobContext, settings: Settings) -> None:
     state = StateService(settings.redis_url)
     connected = False
     try:
-        await state.connect(retries=10, delay=1.0)
-        connected = True
-    except StateError as exc:
-        logger.error("Redis unavailable for session %s: %s", session_id, exc)
-        logger.warning("Continuing without persistence for this session.")
-
-    prior = ChatContext.empty()
-    if connected:
         try:
-            prior = await state.load_chat_context(session_id)
-        except Exception as exc:
-            logger.error("Failed to load chat context: %s", exc)
+            await state.connect(retries=10, delay=1.0)
+            connected = True
+        except StateError as exc:
+            logger.error("Redis unavailable for session %s: %s", session_id, exc)
+            logger.warning("Continuing without persistence for this session.")
 
-    history = _filter_prior_messages(prior)
-    chat_ctx = ChatContext(items=history)
+        prior = ChatContext.empty()
+        mastery: dict[str, dict[str, Any]] = {}
+        if connected:
+            try:
+                prior = await state.load_chat_context(session_id)
+            except Exception as exc:
+                logger.error("Failed to load chat context: %s", exc)
+            try:
+                mastery = await state.get_mastery()
+            except Exception as exc:
+                logger.error("Failed to load mastery: %s", exc)
 
-    session_ctx = SessionContext(session_id=session_id, state=state)
-    agent = build_agent(settings, session_ctx, chat_ctx)
-    session = lka.AgentSession(userdata=session_ctx)
+        history = _filter_prior_messages(prior)
+        chat_ctx = ChatContext(items=history)
 
-    async def _on_item(event: lka.ConversationItemAddedEvent) -> None:
-        item = event.item
-        if isinstance(item, ChatMessage) and item.role in ("user", "assistant"):
-            text = ""
-            for part in item.content:
-                if isinstance(part, str):
-                    text += part
-            if connected:
-                try:
-                    await state.add_transcript_turn(
-                        session_id,
-                        role=item.role,
-                        text=text,
-                        concept=session_ctx.current_concept,
-                    )
-                    await state.save_chat_context(session_id, session.history)
-                except Exception as exc:
-                    logger.error("Failed to persist turn: %s", exc)
+        session_ctx = SessionContext(session_id=session_id, state=state)
+        agent = build_agent(settings, session_ctx, chat_ctx, mastery=mastery)
+        session = lka.AgentSession(userdata=session_ctx)
 
-    session.on("conversation_item_added", _on_item)
+        async def _on_item(event: lka.ConversationItemAddedEvent) -> None:
+            item = event.item
+            if isinstance(item, ChatMessage) and item.role in ("user", "assistant"):
+                text = ""
+                for part in item.content:
+                    if isinstance(part, str):
+                        text += part
+                if connected:
+                    try:
+                        await state.add_transcript_turn(
+                            session_id,
+                            role=item.role,
+                            text=text,
+                            concept=session_ctx.current_concept,
+                        )
+                        await state.save_chat_context(session_id, session.history)
+                    except Exception as exc:
+                        logger.error("Failed to persist turn: %s", exc)
 
-    await ctx.connect(auto_subscribe=lka.AutoSubscribe.AUDIO_ONLY)
+        session.on("conversation_item_added", _on_item)
 
-    if connected:
-        try:
-            await state.start_session(session_id)
-        except Exception as exc:
-            logger.error("Failed to record session start: %s", exc)
+        await ctx.connect(auto_subscribe=lka.AutoSubscribe.AUDIO_ONLY)
 
-    logger.info("Starting voice session %s", session_id)
-    await session.start(agent=agent, room=ctx.room)
+        if connected:
+            try:
+                await state.start_session(session_id)
+            except Exception as exc:
+                logger.error("Failed to record session start: %s", exc)
+
+        logger.info("Starting voice session %s", session_id)
+        await session.start(agent=agent, room=ctx.room)
+    finally:
+        if state._redis is not None:
+            try:
+                await state._redis.aclose()
+            except Exception as exc:
+                logger.warning("Error closing Redis in run_session: %s", exc)
 
 
 async def finalize_session(ctx: lka.JobContext, settings: Settings) -> None:
     session_id = ctx.room.name
     state = StateService(settings.redis_url)
     try:
-        await state.connect(retries=3, delay=0.5)
-    except StateError as exc:
-        logger.error("Cannot finalize session %s: Redis unavailable (%s)", session_id, exc)
-        return
+        try:
+            await state.connect(retries=3, delay=0.5)
+        except StateError as exc:
+            logger.error("Cannot finalize session %s: Redis unavailable (%s)", session_id, exc)
+            return
 
-    try:
-        transcript = await state.get_transcript(session_id)
-        mastery = await state.get_mastery()
-        summary = await generate_session_summary(settings, transcript, mastery)
-        await state.end_session(session_id, summary=summary)
-        logger.info("Session %s finalized with summary", session_id)
-    except Exception as exc:
-        logger.error("Failed to finalize session %s: %s", session_id, exc)
+        try:
+            transcript = await state.get_transcript(session_id)
+            mastery = await state.get_mastery()
+            summary = await generate_session_summary(settings, transcript, mastery)
+            await state.end_session(session_id, summary=summary)
+            logger.info("Session %s finalized with summary", session_id)
+        except Exception as exc:
+            logger.error("Failed to finalize session %s: %s", session_id, exc)
+    finally:
+        if state._redis is not None:
+            try:
+                await state._redis.aclose()
+            except Exception as exc:
+                logger.warning("Error closing Redis in finalize_session: %s", exc)
