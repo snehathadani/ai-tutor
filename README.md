@@ -3,7 +3,8 @@
 A real-time multi-tutor voice AI built with LiveKit, FastAPI, Redis, and React.
 Each tutor is defined by `tutors/<id>/tutor.yaml` and an optional
 `tutors/<id>/problems.yaml`. The worker is dispatched with explicit tutor
-metadata so session ids and mastery are namespaced per tutor.
+metadata so the tutor is resolved per job, while Redis namespaces **mastery by
+student** and **conversation by room** (see [Students and rooms](#students-and-rooms)).
 
 **Verified environment:** backend requirements resolve and install on Python 3.11 (native
 conda dev) and Python 3.12 (`python:3.12-slim` Docker base). The compose stack was validated
@@ -30,12 +31,12 @@ with `podman-compose` 1.0.6 because Docker is not installed on the build machine
      ▼                                          ▼
 ┌─────────────────────────────────────────────────────┐
 │                     Redis 7                          │
-│  tutor:{id}:mastery, tutor:{id}:sessions,           │
+│  tutor:{id}:student:{name}:mastery,                  │
 │  tutor:{id}:session:{sid}:...                       │
 └─────────────────────────────────────────────────────┘
 ```
 
-- **frontend** — Vite + React + TypeScript, dark-only UI. Talks to LiveKit for media and to the API for tokens/history. Nginx proxies `/api` in Docker; Vite dev server proxies it locally.
+- **frontend** — Vite + React + TypeScript with a dark/light theme toggle. Talks to LiveKit for media and to the API for tokens/history. Nginx proxies `/api` in Docker; Vite dev server proxies it locally.
 - **api** — FastAPI/uvicorn. Stateless. Mints LiveKit JWTs and serves read-only tutor/mastery/session views.
 - **agent** — `livekit-agents` worker that joins a room, runs VAD→STT→LLM→TTS, persists transcript/mastery/summary to Redis.
 - **redis** — Sole conversation state store; AOF enabled in compose.
@@ -179,13 +180,52 @@ source .venv/bin/activate
 PYTHONPATH=. python -m pytest tests -v
 ```
 
+## Students and rooms
+
+Two identifiers matter at connect time, and they answer different questions.
+
+| Field in the UI | What it is | What it controls |
+| --- | --- | --- |
+| **Your name** | The student (the learner) | Whose mastery is read and written. Sent as the LiveKit identity and in dispatch metadata. |
+| **Room name** | The conversation | Transcript, summary, chat history and concept position for that room. |
+
+**The student name is the progress key.** It is normalised before use
+(lowercased, spaces and punctuation collapsed), so `Parth`, `parth` and
+` Parth ` are one learner. An empty name falls back to `guest`. Two different
+names never share mastery, even on the same tutor. Mastery follows the student
+**across rooms**: start a new room and the rings carry over, because progress is
+stored under `tutor:{tutor_id}:student:{student}:mastery`.
+
+**The room name is the conversation key.** The frontend prefixes it with the
+tutor id, so typing `First tutorial` becomes room `probability-First tutorial`,
+and that room name is the session id. The transcript, summary, saved chat
+context and current concept all live under that room. Rejoining the **same room**
+resumes the conversation: prior turns load into the agent's context, the concept
+position is restored, and the tutor greets with a welcome-back line. A new room
+starts a fresh conversation while keeping the same student's mastery.
+
+Worked example, same child, same tutor:
+
+1. `Parth` joins room `First tutorial` -> answers questions about sample space.
+   Mastery key: `tutor:probability:student:parth:mastery`.
+2. Later, `Parth` joins room `Sunday practice` -> mastery is already warm, so the
+   tutor can skip ahead; the transcript starts empty because the room is new.
+3. Joining `First tutorial` again -> that room's old transcript and concept are
+   restored, and the mastery is the same record from step 1.
+
+Two rules of thumb: use the **same spelling** of a name to keep one progress
+record (`Parth` and `Parth Thadani` are different students), and reuse a **room
+name** when you want continuity, or pick a new one for a clean conversation.
+Names are not authentication; anyone who knows a name can read that progress.
+
 ## Agent dispatch
 
 The worker registers with the explicit `agent_name` `tutor` (`backend/agent/worker.py`).
 Every time `/api/token` mints a LiveKit JWT, the API also requests an explicit agent
 dispatch for that room via LiveKit's `agent_dispatch.create_dispatch`
-(`backend/api/main.py`). The dispatch metadata is JSON `{"tutor_id": ...}`; the worker
-reads `ctx.job.metadata` to resolve the tutor at job start. Verified against
+(`backend/api/main.py`). The dispatch metadata is JSON
+`{"tutor_id": ..., "student": ...}`; the worker reads `ctx.job.metadata` to
+resolve the tutor and the student at job start. Verified against
 `livekit-agents` 1.8.8.
 
 This means the worker does **not** need to be running before the participant joins. If the worker is down when a token is minted, the dispatch is still created; the frontend joins the room, waits up to ~20 seconds for an agent participant, and then shows a "Retry" button so the user can request another dispatch once the worker is available.

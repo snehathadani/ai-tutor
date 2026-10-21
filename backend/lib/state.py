@@ -153,6 +153,22 @@ class StateService:
             logger.error("Redis error during %s: %s", operation, exc)
             raise StateError(f"Redis unavailable ({operation}): {exc}") from exc
 
+    async def claim_greeting(self, tutor_id: str, sid: str, ttl: int = 60) -> bool:
+        """Return True only if this session may speak the opening line.
+
+        Duplicate dispatch requests can start two jobs in the same room within
+        seconds, and each would greet the child. A short-lived Redis claim makes
+        the greeting idempotent per room, so only the first job speaks.
+        """
+        r = self._ensure()
+        key = f"{NAMESPACE}:{tutor_id}:session:{sid}:greet"
+        try:
+            claimed = await r.set(key, "1", nx=True, ex=ttl)
+        except redis.RedisError as exc:
+            logger.warning("Could not claim greeting for %s: %s", sid, exc)
+            return True
+        return bool(claimed)
+
     async def get_mastery(self, tutor_id: str, student: str) -> dict[str, dict[str, Any]]:
         r = self._ensure()
         data = await self._safe(

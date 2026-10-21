@@ -133,7 +133,6 @@ export default function App() {
   // Tracks the attach effect has attached to audioElRef.current; used to detach
   // exactly what this effect attached when a track leaves the list.
   const attachedTracksRef = useRef<Set<RemoteTrack>>(new Set());
-  const greetedRef = useRef(false);
   const permissionStreamRef = useRef<MediaStream | null>(null);
 
   const releasePermissionStream = useCallback(() => {
@@ -236,7 +235,6 @@ export default function App() {
       setAgentError(null);
       setAgentJoined(false);
       setLastDispatchError(null);
-      greetedRef.current = false;
       setSummary(null);
       setTurns([]);
 
@@ -333,8 +331,7 @@ export default function App() {
           setActiveConcept(null);
           setRemoteAudioTracks([]);
           setAudioBlocked(false);
-          greetedRef.current = false;
-          // Only reached after a real connection, so summary polling is safe now.
+              // Only reached after a real connection, so summary polling is safe now.
           setSessionEnded(true);
           addTurn('assistant', 'Session ended.');
           releasePermissionStream();
@@ -455,12 +452,8 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [room, agentJoined, agentError, lastDispatchError]);
 
-  useEffect(() => {
-    if (agentJoined && !greetedRef.current && selectedTutor) {
-      greetedRef.current = true;
-      addTurn('assistant', `Hi! I am your ${selectedTutor.title.toLowerCase()}. What would you like to work on?`);
-    }
-  }, [agentJoined, addTurn, selectedTutor]);
+  // The agent speaks a real greeting into the room, which arrives as a live
+  // transcription turn. Do not add a second, invented one here.
 
   const retryDispatch = useCallback(async () => {
     if (!room || !selectedTutor) return;

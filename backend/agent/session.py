@@ -315,7 +315,18 @@ async def run_session(
 
         # Greet immediately after the session is live: one short line over TTS
         # only, so the tutor is never silent on join even when the LLM is down.
-        await speak_greeting(session, opening_line)
+        # A duplicate dispatch can start a second job in the same room, so the
+        # greeting is claimed in Redis and only the first job speaks.
+        may_greet = True
+        if connected:
+            try:
+                may_greet = await state.claim_greeting(tutor.id, session_id)
+            except Exception as exc:
+                logger.warning("Greeting claim failed, greeting anyway: %s", exc)
+        if may_greet:
+            await speak_greeting(session, opening_line)
+        else:
+            logger.info("Another job already greeted room %s", session_id)
 
         # Hold the entrypoint open for the whole call so persistence, mastery
         # and the concept position keep writing to Redis.

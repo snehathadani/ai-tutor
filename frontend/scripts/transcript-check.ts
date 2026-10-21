@@ -160,6 +160,27 @@ turns = mergeTranscriptionTurns(
 );
 check('markup-only segment is dropped', turns.length === 1, `got ${turns.length}`);
 
+// 12. A duplicate dispatch can greet twice; only one should render.
+turns = [];
+turns = mergeTranscriptionTurns(
+  turns,
+  [{ id: 'w1', text: "Welcome back! Let's keep going with Experiment vs theory.", final: true }],
+  'assistant',
+  'agent-1'
+);
+turns = mergeTranscriptionTurns(
+  turns,
+  [{ id: 'w2', text: "Welcome back! Let's keep going with Experiment vs theory.", final: true }],
+  'assistant',
+  'agent-2'
+);
+check('duplicate welcome greetings collapse to one turn', turns.length === 1, `got ${turns.length}`);
+check(
+  'the greeting text is not repeated inside the turn',
+  turns[0]?.text === "Welcome back! Let's keep going with Experiment vs theory.",
+  `got "${turns[0]?.text}"`
+);
+
 if (failures.length > 0) {
   console.error(`\n${failures.length} assertion(s) failed`);
   process.exit(1);

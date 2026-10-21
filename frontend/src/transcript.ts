@@ -50,6 +50,16 @@ export function mergeTranscriptionTurns(
     }
 
     const last = next[next.length - 1];
+    // Duplicate dispatches can make two jobs greet the same room; keep one.
+    if (
+      role === 'assistant' &&
+      /^welcome back!/i.test(text) &&
+      last !== undefined &&
+      last.role === 'assistant' &&
+      /^welcome back!/i.test(last.text)
+    ) {
+      continue;
+    }
     if (
       role === 'assistant' &&
       segment.final &&
