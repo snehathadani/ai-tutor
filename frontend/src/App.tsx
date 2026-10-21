@@ -5,6 +5,7 @@ import {
   RoomEvent,
   Track,
   TranscriptionSegment,
+  setLogLevel,
   type Participant,
   type RemoteTrack,
 } from 'livekit-client';
@@ -32,6 +33,18 @@ interface Summary {
 const TUTOR_WAKEUP_MS = 20000;
 const SUMMARY_POLL_INTERVAL_MS = 2000;
 const SUMMARY_POLL_WINDOW_MS = 30000;
+const MIC_PERMISSION_ERROR =
+  'Microphone permission was blocked. Allow microphone access for this site and click Connect again.';
+const PC_CONNECTION_ERROR =
+  'Could not establish the browser media connection (could not establish pc connection). ' +
+  'Make sure microphone permission is allowed for this site and that no other app is holding ' +
+  'the microphone, then click Connect again. If it still fails in Firefox, try Chrome or Edge.';
+
+// `?debug=1` turns on livekit-client's verbose logging once at startup so the
+// browser console shows ICE/DTLS detail when a connection fails.
+if (new URLSearchParams(window.location.search).get('debug') === '1') {
+  setLogLevel('debug');
+}
 
 export function LinkCard({
   tutor,
@@ -87,6 +100,17 @@ export default function App() {
   const [activeConcept, setActiveConcept] = useState<string | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const greetedRef = useRef(false);
+  const permissionStreamRef = useRef<MediaStream | null>(null);
+
+  const releasePermissionStream = useCallback(() => {
+    const stream = permissionStreamRef.current;
+    if (!stream) return;
+    stream.getTracks().forEach((t) => t.stop());
+    permissionStreamRef.current = null;
+  }, []);
+
+  // No microphone tracks may outlive the component (or a session).
+  useEffect(() => releasePermissionStream, [releasePermissionStream]);
 
   useEffect(() => {
     let cancelled = false;
@@ -180,6 +204,21 @@ export default function App() {
           setLastDispatchError(dispatch_error);
         }
 
+        // Request microphone permission before connecting: livekit-client can
+        // fail with "could not establish pc connection" when the page has not
+        // been granted mic access yet. The tracks are stopped immediately so
+        // LiveKit acquires the device itself afterwards.
+        try {
+          const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          permissionStreamRef.current = permissionStream;
+          permissionStream.getTracks().forEach((t) => t.stop());
+        } catch {
+          // Denied/unavailable microphone: never attempt the room connection.
+          setError(MIC_PERMISSION_ERROR);
+          setConnectionState(ConnectionState.Disconnected);
+          return;
+        }
+
         const newRoom = new Room({ adaptiveStream: true });
 
         newRoom.on(RoomEvent.Connected, () => {
@@ -197,6 +236,7 @@ export default function App() {
           // Only reached after a real connection, so summary polling is safe now.
           setSessionEnded(true);
           addTurn('assistant', 'Session ended.');
+          releasePermissionStream();
         });
 
         newRoom.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
@@ -247,11 +287,16 @@ export default function App() {
         // failed connects never trigger summary polling.
         setSessionId(prefixedRoom);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        const message = err instanceof Error ? err.message : String(err);
+        setError(
+          message.toLowerCase().includes('could not establish pc connection')
+            ? PC_CONNECTION_ERROR
+            : message
+        );
         setConnectionState(ConnectionState.Disconnected);
       }
     },
-    [addTurn, activeConcept, selectedTutor]
+    [addTurn, activeConcept, selectedTutor, releasePermissionStream]
   );
 
   useEffect(() => {
@@ -317,8 +362,9 @@ export default function App() {
   const disconnect = useCallback(async () => {
     if (!room) return;
     setActiveConcept(null);
+    releasePermissionStream();
     await room.disconnect();
-  }, [room]);
+  }, [room, releasePermissionStream]);
 
   useEffect(() => {
     if (!sessionId || !sessionEnded || !selectedTutor) return;
