@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { Tutor } from './TutorPicker';
 
@@ -8,10 +8,15 @@ interface Concept {
   level: number;
   correct: number;
   total: number;
+  covered: boolean;
 }
 
 interface Props {
   tutor: Tutor | null;
+  /** Concept the agent is currently working on; highlighted in the grid. */
+  activeConcept?: string | null;
+  /** Bumped by the parent whenever the agent reports a mastery change. */
+  refreshKey?: number;
 }
 
 // A failed fetch is not fatal: the mastery API may be briefly unavailable
@@ -20,10 +25,55 @@ interface Props {
 const FAILURE_ERROR_THRESHOLD = 3;
 const FETCH_INTERVAL_MS = 5000;
 
-export default function MasteryPanel({ tutor }: Props) {
+type ProgressState = 'covered' | 'in-progress' | 'not-started';
+
+function progressState(concept: Concept, isActive: boolean): ProgressState {
+  if (concept.covered) return 'covered';
+  if (concept.total > 0 || isActive) return 'in-progress';
+  return 'not-started';
+}
+
+const STATE_LABELS: Record<ProgressState, string> = {
+  covered: 'Covered',
+  'in-progress': 'In progress',
+  'not-started': 'Not started',
+};
+
+export default function MasteryPanel({ tutor, activeConcept, refreshKey = 0 }: Props) {
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [failureCount, setFailureCount] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  // Last refresh key that was already acted on, so the initial render does
+  // not trigger a second fetch on top of the one the poll effect starts.
+  const lastRefreshKeyRef = useRef(refreshKey);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const fetchMastery = useCallback(async () => {
+    if (!tutor) return;
+    try {
+      const res = await fetch(`/api/mastery?tutor=${encodeURIComponent(tutor.id)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { concepts: Concept[] };
+      if (!mountedRef.current) return;
+      // Success: refresh the data and clear any failure state.
+      setConcepts(data.concepts);
+      setFailureCount(0);
+      setLastError(null);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      // Non-fatal: keep the last good data on screen, count the failure,
+      // and retry on the normal interval.
+      setFailureCount((n) => n + 1);
+      setLastError(err instanceof Error ? err.message : String(err));
+    }
+  }, [tutor]);
 
   useEffect(() => {
     if (!tutor) {
@@ -32,37 +82,24 @@ export default function MasteryPanel({ tutor }: Props) {
       setLastError(null);
       return;
     }
-    let cancelled = false;
     // A new tutor starts with a clean slate; the previous tutor's data must
     // not flash in the grid while the first fetch is in flight.
     setConcepts([]);
     setFailureCount(0);
     setLastError(null);
-    const fetchMastery = async () => {
-      try {
-        const res = await fetch(`/api/mastery?tutor=${encodeURIComponent(tutor.id)}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as { concepts: Concept[] };
-        if (cancelled) return;
-        // Success: refresh the data and clear any failure state.
-        setConcepts(data.concepts);
-        setFailureCount(0);
-        setLastError(null);
-      } catch (err) {
-        if (cancelled) return;
-        // Non-fatal: keep the last good data on screen, count the failure,
-        // and retry on the normal interval.
-        setFailureCount((n) => n + 1);
-        setLastError(err instanceof Error ? err.message : String(err));
-      }
-    };
-    fetchMastery();
-    const id = setInterval(fetchMastery, FETCH_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [tutor]);
+    void fetchMastery();
+    const id = setInterval(() => void fetchMastery(), FETCH_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [tutor, fetchMastery]);
+
+  // The agent pushes a mastery update over the room data channel; refetch
+  // right away instead of waiting for the next poll.
+  useEffect(() => {
+    if (!tutor) return;
+    if (lastRefreshKeyRef.current === refreshKey) return;
+    lastRefreshKeyRef.current = refreshKey;
+    void fetchMastery();
+  }, [tutor, refreshKey, fetchMastery]);
 
   if (!tutor) {
     return (
@@ -96,10 +133,16 @@ export default function MasteryPanel({ tutor }: Props) {
         {concepts.map((c) => {
           const pct = (c.level / 3) * 100;
           const levelLabel = tutor.level_labels?.[c.level];
+          const isActive = c.slug === activeConcept;
+          const state = progressState(c, isActive);
           return (
-            <div key={c.slug} className="mastery-card">
+            <div
+              key={c.slug}
+              className={`mastery-card${isActive ? ' active' : ''}`}
+            >
               <div className="ring" style={{ '--pct': pct } as React.CSSProperties} />
               <h4>{c.label}</h4>
+              <span className={`mastery-state ${state}`}>{STATE_LABELS[state]}</span>
               <span>
                 {levelLabel ? levelLabel : `Lvl ${c.level}/3`} · {c.correct}/{c.total} correct
               </span>

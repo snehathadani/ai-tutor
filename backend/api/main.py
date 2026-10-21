@@ -263,6 +263,7 @@ async def get_mastery(tutor: str = Query(..., alias="tutor")) -> dict[str, Any]:
                 "level": record.get("level", 0),
                 "correct": record.get("correct", 0),
                 "total": record.get("total", 0),
+                "covered": bool(record.get("covered", False)),
             }
         )
     return {"concepts": concepts}

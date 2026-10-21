@@ -17,6 +17,14 @@ import SummaryView from './components/SummaryView';
 import TranscriptPanel from './components/TranscriptPanel';
 import TutorPicker, { type Tutor } from './components/TutorPicker';
 import VoicePanel from './components/VoicePanel';
+import {
+  applyTheme,
+  resolveInitialTheme,
+  storedTheme,
+  storeTheme,
+  watchSystemTheme,
+  type Theme,
+} from './theme';
 
 interface Summary {
   summary: string;
@@ -92,6 +100,13 @@ export default function App() {
   const [invalidTutors, setInvalidTutors] = useState<{ id?: string; error: string }[]>([]);
   const [selectedTutor, setSelectedTutor] = useState<Tutor | null>(null);
   const [activeConcept, setActiveConcept] = useState<string | null>(null);
+  // Bumped whenever the agent reports a mastery change, so the panel refetches
+  // immediately instead of waiting for its next poll.
+  const [masteryRefreshKey, setMasteryRefreshKey] = useState(0);
+  const [theme, setTheme] = useState<Theme>(() => resolveInitialTheme());
+  // True once the user picks a theme explicitly; the OS preference then stops
+  // overriding the choice.
+  const themePinnedRef = useRef(storedTheme() !== null);
   // Remote audio tracks currently subscribed, plus whether the browser blocked
   // playing them (autoplay policy). The attach effect consumes the list.
   const [remoteAudioTracks, setRemoteAudioTracks] = useState<RemoteTrack[]>([]);
@@ -112,6 +127,29 @@ export default function App() {
 
   // No microphone tracks may outlive the component (or a session).
   useEffect(() => releasePermissionStream, [releasePermissionStream]);
+
+  // Keep <html data-theme> in sync with the React state.
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
+
+  // Without an explicit choice the theme follows the OS preference.
+  useEffect(
+    () =>
+      watchSystemTheme((next) => {
+        if (!themePinnedRef.current) setTheme(next);
+      }),
+    []
+  );
+
+  const toggleTheme = useCallback(() => {
+    themePinnedRef.current = true;
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      storeTheme(next);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -279,6 +317,22 @@ export default function App() {
         newRoom.on(
           RoomEvent.DataReceived,
           (payload: Uint8Array, _participant?: Participant, _kind?: unknown, topic?: string) => {
+            if (topic === 'tutor:mastery') {
+              // The agent wrote mastery: refresh the panel now rather than
+              // waiting for the next poll.
+              try {
+                const data = JSON.parse(new TextDecoder().decode(payload)) as {
+                  type?: string;
+                  slug?: string;
+                };
+                if (data.type === 'mastery_updated') {
+                  setMasteryRefreshKey((n) => n + 1);
+                }
+              } catch {
+                // ignore malformed packets
+              }
+              return;
+            }
             if (topic !== 'tutor:concept') return;
             try {
               const data = JSON.parse(new TextDecoder().decode(payload)) as {
@@ -494,8 +548,22 @@ export default function App() {
   return (
     <div className="app">
       <header className="card">
-        <h1>AI Tutor</h1>
-        <p className="status">A Socratic, kid-friendly voice tutor.</p>
+        <div className="form-row" style={{ justifyContent: 'space-between' }}>
+          <div>
+            <h1>AI Tutor</h1>
+            <p className="status">A Socratic, kid-friendly voice tutor.</p>
+          </div>
+          <button
+            type="button"
+            className="secondary theme-toggle"
+            onClick={toggleTheme}
+            aria-label={`Current theme ${theme}. Switch to ${
+              theme === 'dark' ? 'light' : 'dark'
+            } theme.`}
+          >
+            {theme === 'dark' ? 'Dark' : 'Light'}
+          </button>
+        </div>
       </header>
 
       {error && <div className="card error">Error: {error}</div>}
@@ -568,7 +636,11 @@ export default function App() {
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--gap)' }}>
           <LinkCard tutor={selectedTutor} activeConcept={activeConcept} onClear={() => setActiveConcept(null)} />
-          <MasteryPanel tutor={selectedTutor} />
+          <MasteryPanel
+            tutor={selectedTutor}
+            activeConcept={activeConcept}
+            refreshKey={masteryRefreshKey}
+          />
         </div>
       </div>
 

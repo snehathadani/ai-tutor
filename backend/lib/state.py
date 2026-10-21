@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,10 @@ from livekit.agents.llm import ChatContext
 logger = logging.getLogger(__name__)
 
 NAMESPACE = "tutor"
+
+# Called with (tutor_id, slug) after every mastery write so a live session can
+# push the change to the browser instead of waiting for its next poll.
+MasteryListener = Callable[[str, str], Awaitable[None]]
 
 
 def _mastery_key(tutor_id: str) -> str:
@@ -51,6 +56,8 @@ def _default_concept() -> dict[str, Any]:
         "streak": 0,
         "weighted_correct": 0.0,
         "weighted_total": 0.0,
+        "covered": False,
+        "covered_ts": 0.0,
         "updated_ts": 0.0,
     }
 
@@ -70,11 +77,23 @@ def _compute_level(record: dict[str, Any]) -> int:
     return 0
 
 
+def _effective_level(record: dict[str, Any]) -> int:
+    """Reported level: the computed mastery level, floored at 1 once covered.
+
+    Coverage is progress, not mastery: `correct`/`total` are left untouched by
+    it, but a concept the student worked through and then left has to show
+    progress in the UI even when no answer was ever graded for it.
+    """
+    return max(_compute_level(record), 1 if record.get("covered") else 0)
+
+
 @dataclass
 class StateService:
     redis_url: str = ""
     redis_client: redis.Redis | None = None
     _redis: redis.Redis | None = None
+    # Optional hook invoked after every mastery write; see MasteryListener.
+    on_mastery_update: MasteryListener | None = None
 
     async def connect(self, retries: int = 10, delay: float = 1.0) -> None:
         if self.redis_client is not None:
@@ -126,7 +145,7 @@ class StateService:
         result: dict[str, dict[str, Any]] = {}
         for slug, raw in data.items():
             record = json.loads(raw)
-            record["level"] = _compute_level(record)
+            record["level"] = _effective_level(record)
             result[slug] = record
         return result
 
@@ -146,8 +165,38 @@ class StateService:
             record["streak"] = record.get("streak", 0) + 1
         else:
             record["streak"] = 0
-        record["level"] = _compute_level(record)
+        record["level"] = _effective_level(record)
         await self._safe(r.hset(key, slug, json.dumps(record)), "update_mastery")
+        await self._notify_mastery_update(tutor_id, slug)
+
+    async def mark_covered(self, tutor_id: str, slug: str) -> None:
+        """Mark a concept as covered: the student worked through it and moved on.
+
+        Coverage is progress, not mastery, so `correct`/`total` are left
+        untouched; the reported level is floored at 1 while the computed
+        mastery level is used above that.
+        """
+        r = self._ensure()
+        key = _mastery_key(tutor_id)
+        raw = await self._safe(r.hget(key, slug), "mark_covered")
+        record = json.loads(raw) if raw else _default_concept()
+        record["covered"] = True
+        record["covered_ts"] = time.time()
+        record["updated_ts"] = record["covered_ts"]
+        record["level"] = _effective_level(record)
+        await self._safe(r.hset(key, slug, json.dumps(record)), "mark_covered")
+        await self._notify_mastery_update(tutor_id, slug)
+
+    async def _notify_mastery_update(self, tutor_id: str, slug: str) -> None:
+        """Tell the listener that mastery changed so it can be pushed out."""
+        if self.on_mastery_update is None:
+            return
+        try:
+            await self.on_mastery_update(tutor_id, slug)
+        except Exception as exc:
+            logger.warning(
+                "Mastery update listener failed for %s/%s: %s", tutor_id, slug, exc
+            )
 
     async def record_observation(self, tutor_id: str, slug: str, signal: str) -> None:
         if signal not in ("got_it", "struggling"):

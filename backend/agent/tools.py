@@ -13,6 +13,9 @@ from agent.context import SessionContext
 
 logger = logging.getLogger(__name__)
 
+# Student answers are logged, not stored, so keep the log line short.
+_ARG_LOG_MAX_CHARS = 60
+
 
 def _normalize(text: str) -> str:
     return re.sub(r"[^\w\s/\.\-]", "", text.lower().strip())
@@ -62,6 +65,9 @@ def _ctx(ctx: RunContext) -> SessionContext:
 @lka.function_tool
 async def get_problem(ctx: RunContext, concept_slug: str, difficulty: int = 1) -> str:
     """Get a practice problem for a concept."""
+    logger.info(
+        "tool get_problem(concept_slug=%s, difficulty=%s)", concept_slug, difficulty
+    )
     session_ctx = _ctx(ctx)
     tutor = session_ctx.tutor
     problems = tutor.problems_by_concept.get(concept_slug, [])
@@ -69,6 +75,10 @@ async def get_problem(ctx: RunContext, concept_slug: str, difficulty: int = 1) -
         return json.dumps({"error": f"Unknown concept or no problems: {concept_slug}"})
     problem = problems[(difficulty - 1) % len(problems)]
     session_ctx.set_problem(problem.model_dump())
+    # Publishing the new concept and marking the one we left are the two
+    # side effects of a concept switch.
+    await session_ctx.publish_concept()
+    await session_ctx.flush_covered()
     return json.dumps(
         {
             "problem_id": problem.id,
@@ -82,6 +92,11 @@ async def get_problem(ctx: RunContext, concept_slug: str, difficulty: int = 1) -
 @lka.function_tool
 async def grade_answer(ctx: RunContext, problem_id: str, student_answer: str) -> str:
     """Check a student's answer against the hidden answer key. Never reveals the answer."""
+    logger.info(
+        "tool grade_answer(problem_id=%s, student_answer=%s)",
+        problem_id,
+        str(student_answer)[:_ARG_LOG_MAX_CHARS],
+    )
     session_ctx = _ctx(ctx)
     problem = session_ctx.current_problem
     if problem is None or problem.get("id") != problem_id:
@@ -107,6 +122,7 @@ async def grade_answer(ctx: RunContext, problem_id: str, student_answer: str) ->
     await session_ctx.state.update_mastery(session_ctx.tutor.id, concept, correct=correct, weight=1.0)
     if correct:
         session_ctx.clear_problem()
+        await session_ctx.publish_concept()
         return json.dumps(
             {
                 "correct": True,
@@ -127,6 +143,9 @@ async def record_observation(ctx: RunContext, concept_slug: str, signal: str) ->
 
     signal must be "got_it" or "struggling".
     """
+    logger.info(
+        "tool record_observation(concept_slug=%s, signal=%s)", concept_slug, signal
+    )
     if signal not in ("got_it", "struggling"):
         return json.dumps(
             {
@@ -143,6 +162,7 @@ async def record_observation(ctx: RunContext, concept_slug: str, signal: str) ->
 @lka.function_tool
 async def get_mastery(ctx: RunContext) -> str:
     """Read the student's current mastery snapshot."""
+    logger.info("tool get_mastery()")
     session_ctx = _ctx(ctx)
     mastery = await session_ctx.state.get_mastery(session_ctx.tutor.id)
     return json.dumps(mastery)

@@ -1,14 +1,62 @@
+/* Theme tokens.
+   The values in :root are the dark theme, so the very first paint is never
+   unstyled. index.html sets data-theme on <html> before first paint with the
+   stored choice or the system preference, and [data-theme="light"] overrides
+   the colours below. */
 :root {
   --bg: #0b0d12;
   --panel: #141820;
   --panel-2: #1c212e;
-  --accent: #3b82f6;
-  --accent-2: #22c55e;
   --text: #e6eaf2;
   --muted: #94a3b8;
+  --accent: #3b82f6;
+  --accent-2: #22c55e;
+  --border: #2d3548;
+  --ring-track: #2d3548;
+  --badge-bg: #2d3548;
+  --user-turn: #1e3a5f;
   --danger: #ef4444;
+  --warning: #f59e0b;
+  --on-accent: #ffffff;
   --radius: 12px;
   --gap: 1rem;
+  color-scheme: dark;
+}
+
+[data-theme="dark"] {
+  --bg: #0b0d12;
+  --panel: #141820;
+  --panel-2: #1c212e;
+  --text: #e6eaf2;
+  --muted: #94a3b8;
+  --accent: #3b82f6;
+  --accent-2: #22c55e;
+  --border: #2d3548;
+  --ring-track: #2d3548;
+  --badge-bg: #2d3548;
+  --user-turn: #1e3a5f;
+  --danger: #ef4444;
+  --warning: #f59e0b;
+  --on-accent: #ffffff;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bg: #f4f6fb;
+  --panel: #ffffff;
+  --panel-2: #eef1f7;
+  --text: #131722;
+  --muted: #55607a;
+  --accent: #2563eb;
+  --accent-2: #166534;
+  --border: #d3d9e6;
+  --ring-track: #d3d9e6;
+  --badge-bg: #e3e8f2;
+  --user-turn: #dbe7fb;
+  --danger: #dc2626;
+  --warning: #b45309;
+  --on-accent: #ffffff;
+  color-scheme: light;
 }
 
 * {
@@ -49,7 +97,7 @@ button {
   padding: 0.6rem 1rem;
   font-weight: 600;
   background-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   transition: opacity 0.15s ease;
 }
 
@@ -69,6 +117,7 @@ button.secondary {
 
 button.danger {
   background-color: var(--danger);
+  color: var(--on-accent);
 }
 
 .card {
@@ -80,7 +129,7 @@ button.danger {
 input {
   background-color: var(--panel-2);
   color: var(--text);
-  border: 1px solid #2d3548;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.6rem 0.8rem;
   font-size: 1rem;
@@ -107,7 +156,7 @@ input:focus {
   display: inline-block;
   padding: 0.1rem 0.5rem;
   border-radius: 999px;
-  background-color: #2d3548;
+  background-color: var(--badge-bg);
   color: var(--muted);
   font-size: 0.75rem;
   font-weight: 600;
@@ -129,11 +178,19 @@ input:focus {
 
 .turn.user {
   align-self: flex-end;
-  background-color: #1e3a5f;
+  background-color: var(--user-turn);
 }
 
 .turn.assistant {
   align-self: flex-start;
+}
+
+.jump-latest {
+  margin-top: 0.5rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  background-color: var(--panel-2);
+  color: var(--text);
 }
 
 .mastery-grid {
@@ -144,8 +201,13 @@ input:focus {
 
 .mastery-card {
   background-color: var(--panel-2);
+  border: 1px solid transparent;
   border-radius: var(--radius);
   padding: 0.75rem;
+}
+
+.mastery-card.active {
+  border-color: var(--accent);
 }
 
 .mastery-card h4 {
@@ -158,11 +220,33 @@ input:focus {
   font-size: 0.8rem;
 }
 
+.mastery-card .mastery-state {
+  display: block;
+  width: fit-content;
+  margin-bottom: 0.35rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background-color: var(--badge-bg);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.mastery-card .mastery-state.covered {
+  color: var(--accent-2);
+}
+
+.mastery-card .mastery-state.in-progress {
+  color: var(--accent);
+}
+
 .ring {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: conic-gradient(var(--accent-2) calc(var(--pct) * 1%), #2d3548 0);
+  background: conic-gradient(var(--accent-2) calc(var(--pct) * 1%), var(--ring-track) 0);
   display: grid;
   place-items: center;
   margin-bottom: 0.5rem;
@@ -182,7 +266,7 @@ input:focus {
 }
 
 .warning {
-  color: #f59e0b;
+  color: var(--warning);
   font-size: 0.9rem;
 }
 
@@ -230,4 +314,11 @@ input:focus {
 
 .link-list li {
   margin-bottom: 0.25rem;
+}
+
+.theme-toggle {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.8rem;
+  background-color: var(--panel-2);
+  color: var(--text);
 }
