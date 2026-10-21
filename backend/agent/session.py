@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 # Upper bound for waiting on the greeting's playout so a wedged TTS pipeline
 # cannot stall run_session indefinitely.
 GREETING_PLAYOUT_TIMEOUT_S = 15.0
+# How long to wait for fire-and-forget turn persistence before closing Redis.
+PERSIST_DRAIN_TIMEOUT_S = 5.0
 # user_input_transcribed fires for every partial STT result; only keep this
 # many characters of the transcript per log line.
 _TRANSCRIPT_LOG_MAX_CHARS = 120
@@ -171,6 +173,7 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
     session_id = ctx.room.name
     state = StateService(settings.redis_url)
     connected = False
+    persist_tasks: set[asyncio.Task[None]] = set()
     try:
         try:
             await state.connect(retries=10, delay=1.0)
@@ -241,6 +244,17 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
         )
         register_pipeline_logging(session)
 
+        # `session.start()` returns as soon as the session is live; the job
+        # keeps running until the room closes. Without waiting here the
+        # entrypoint returns immediately, the finally block closes Redis, and
+        # every later turn fails with "Redis client is not connected".
+        close_event = asyncio.Event()
+
+        def _on_close(_event: object) -> None:
+            close_event.set()
+
+        session.on("close", _on_close)
+
         await ctx.connect(auto_subscribe=lka.AutoSubscribe.AUDIO_ONLY)
 
         if connected:
@@ -265,7 +279,24 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
             resumed=resumed_turns > 0,
             concept_label=concept_label,
         )
+
+        # Hold the entrypoint open for the whole call so persistence, mastery
+        # and the concept position keep writing to Redis.
+        await close_event.wait()
+        logger.info("Voice session %s closed", session_id)
     finally:
+        # Turn persistence is fire-and-forget so it never blocks the voice
+        # loop, which means late tasks can still be writing when the job ends.
+        # Drain them before closing Redis or the final turns are lost with
+        # "Redis client is not connected".
+        if persist_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*persist_tasks, return_exceptions=True),
+                    timeout=PERSIST_DRAIN_TIMEOUT_S,
+                )
+            except Exception as exc:
+                logger.warning("Persist tasks did not drain cleanly: %s", exc)
         try:
             await state.close()
         except Exception as exc:
