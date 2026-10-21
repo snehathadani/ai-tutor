@@ -30,6 +30,8 @@ interface Summary {
 }
 
 const TUTOR_WAKEUP_MS = 20000;
+const SUMMARY_POLL_INTERVAL_MS = 2000;
+const SUMMARY_POLL_WINDOW_MS = 30000;
 
 export function LinkCard({
   tutor,
@@ -75,6 +77,7 @@ export default function App() {
   const [muted, setMuted] = useState(false);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionEnded, setSessionEnded] = useState(false);
   const [agentJoined, setAgentJoined] = useState(false);
   const [agentError, setAgentError] = useState<string | null>(null);
   const [lastDispatchError, setLastDispatchError] = useState<string | null>(null);
@@ -155,7 +158,7 @@ export default function App() {
       greetedRef.current = false;
       setSummary(null);
       setTurns([]);
-      setSessionId(prefixedRoom);
+      setSessionEnded(false);
       setActiveConcept(null);
 
       try {
@@ -191,6 +194,8 @@ export default function App() {
           setLastDispatchError(null);
           setActiveConcept(null);
           greetedRef.current = false;
+          // Only reached after a real connection, so summary polling is safe now.
+          setSessionEnded(true);
           addTurn('assistant', 'Session ended.');
         });
 
@@ -238,6 +243,9 @@ export default function App() {
         await newRoom.localParticipant.setMicrophoneEnabled(true);
         setMuted(false);
         setRoom(newRoom);
+        // Mark the session live only after connect and mic enable succeeded, so
+        // failed connects never trigger summary polling.
+        setSessionId(prefixedRoom);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
         setConnectionState(ConnectionState.Disconnected);
@@ -313,8 +321,16 @@ export default function App() {
   }, [room]);
 
   useEffect(() => {
-    if (!sessionId || room || !selectedTutor) return;
+    if (!sessionId || !sessionEnded || !selectedTutor) return;
     let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | undefined;
+    const startedAt = Date.now();
+    const stop = () => {
+      if (intervalId !== undefined) {
+        clearInterval(intervalId);
+        intervalId = undefined;
+      }
+    };
     const poll = async () => {
       try {
         const res = await fetch(
@@ -323,20 +339,25 @@ export default function App() {
           )}`
         );
         if (res.ok) {
-          const data = (await res.json()) as Summary;
-          if (!cancelled) setSummary(data);
+          // First successful summary ends polling.
+          stop();
+          if (!cancelled) setSummary((await res.json()) as Summary);
+          return;
         }
+        // Non-OK (typically 404 while the summary is still being generated)
+        // is "not ready yet", not an error state.
       } catch {
-        // ignore polling errors
+        // Network hiccup: keep polling until the window elapses.
       }
+      if (Date.now() - startedAt >= SUMMARY_POLL_WINDOW_MS) stop();
     };
-    const id = setInterval(poll, 2000);
+    intervalId = setInterval(poll, SUMMARY_POLL_INTERVAL_MS);
     poll();
     return () => {
       cancelled = true;
-      clearInterval(id);
+      stop();
     };
-  }, [sessionId, room, selectedTutor]);
+  }, [sessionId, sessionEnded, selectedTutor]);
 
   return (
     <div className="app">

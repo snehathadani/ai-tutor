@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -24,6 +25,56 @@ def _filter_prior_messages(chat_ctx: ChatContext) -> list[Any]:
             continue
         kept.append(item)
     return kept
+
+
+def register_turn_persistence(
+    session: lka.AgentSession,
+    *,
+    state: StateService,
+    tutor: Tutor,
+    session_ctx: SessionContext,
+    session_id: str,
+    connected: bool,
+) -> set[asyncio.Task[None]]:
+    """Register the conversation_item_added handler that persists turns.
+
+    livekit-agents' EventEmitter raises ValueError when a coroutine function is
+    passed to ``.on()``, so the registered handler is synchronous and schedules
+    the async persistence body with ``asyncio.create_task``. The returned set
+    holds strong references to in-flight tasks so they are not garbage
+    collected mid-flight; each task discards itself via a done callback. The
+    caller must keep the returned set alive while the session runs (run_session
+    holds it in a local).
+    """
+    pending: set[asyncio.Task[None]] = set()
+
+    async def _persist(event: lka.ConversationItemAddedEvent) -> None:
+        item = event.item
+        if isinstance(item, ChatMessage) and item.role in ("user", "assistant"):
+            text = ""
+            for part in item.content:
+                if isinstance(part, str):
+                    text += part
+            if connected:
+                try:
+                    await state.add_transcript_turn(
+                        tutor.id,
+                        session_id,
+                        role=item.role,
+                        text=text,
+                        concept=session_ctx.current_concept,
+                    )
+                    await state.save_chat_context(tutor.id, session_id, session.history)
+                except Exception as exc:
+                    logger.error("Failed to persist turn: %s", exc)
+
+    def _on_item(event: lka.ConversationItemAddedEvent) -> None:
+        task = asyncio.create_task(_persist(event))
+        pending.add(task)
+        task.add_done_callback(pending.discard)
+
+    session.on("conversation_item_added", _on_item)
+    return pending
 
 
 async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> None:
@@ -59,27 +110,14 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
         agent = build_agent(settings, tutor, session_ctx, chat_ctx, mastery=mastery)
         session = lka.AgentSession(userdata=session_ctx)
 
-        async def _on_item(event: lka.ConversationItemAddedEvent) -> None:
-            item = event.item
-            if isinstance(item, ChatMessage) and item.role in ("user", "assistant"):
-                text = ""
-                for part in item.content:
-                    if isinstance(part, str):
-                        text += part
-                if connected:
-                    try:
-                        await state.add_transcript_turn(
-                            tutor.id,
-                            session_id,
-                            role=item.role,
-                            text=text,
-                            concept=session_ctx.current_concept,
-                        )
-                        await state.save_chat_context(tutor.id, session_id, session.history)
-                    except Exception as exc:
-                        logger.error("Failed to persist turn: %s", exc)
-
-        session.on("conversation_item_added", _on_item)
+        persist_tasks = register_turn_persistence(
+            session,
+            state=state,
+            tutor=tutor,
+            session_ctx=session_ctx,
+            session_id=session_id,
+            connected=connected,
+        )
 
         await ctx.connect(auto_subscribe=lka.AutoSubscribe.AUDIO_ONLY)
 
@@ -114,7 +152,10 @@ async def finalize_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor
             mastery = await state.get_mastery(tutor_id)
             summary = await generate_session_summary(settings, transcript, mastery, tutor)
             await state.end_session(tutor_id, session_id, summary=summary)
-            logger.info("Session %s finalized with summary", session_id)
+            if summary is not None:
+                logger.info("Session %s finalized with summary", session_id)
+            else:
+                logger.info("Session %s finalized with no summary (empty transcript)", session_id)
         except Exception as exc:
             logger.error("Failed to finalize session %s: %s", session_id, exc)
     finally:
