@@ -616,7 +616,8 @@ export default function App() {
         </div>
       </header>
 
-      {error && <div className="card error">Error: {error}</div>}
+      <main className="app-body">
+        {error && <div className="card error">Error: {error}</div>}
 
       <TutorPicker
         tutors={tutors}
@@ -695,7 +696,8 @@ export default function App() {
         </aside>
       </div>
 
-      {summary && <SummaryView summary={summary} onClose={() => setSummary(null)} />}
+        {summary && <SummaryView summary={summary} onClose={() => setSummary(null)} />}
+      </main>
     </div>
   );
 }

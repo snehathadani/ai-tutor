@@ -73,14 +73,33 @@ body,
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
+/* The page itself never scrolls: the app is exactly one viewport tall and the
+   inner .app-body owns any overflow. That stops a browser scrollbar appearing
+   on startup, when the picker and connect form are on screen. */
+body {
+  overflow: hidden;
+}
+
 .app {
-  max-width: 960px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: var(--gap);
-  min-height: 100%;
+  height: 100dvh;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: var(--gap);
+  overflow: hidden;
+}
+
+.app-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  overflow-y: auto;
+  padding-right: 0.25rem;
 }
 
 h1,
@@ -175,26 +194,32 @@ input:focus {
 }
 
 /* Two-column workspace: conversation on the left, reference and progress on
-   the right. The rail scrolls on its own so a long concept list never pushes
-   the transcript short. */
+   the right. Both columns track the viewport height; each scrolls inside its
+   own panel, so resizing the window resizes the transcript and the mastery
+   list instead of moving the whole page. */
 .workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
   gap: var(--gap);
-  align-items: start;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .transcript-card {
   display: flex;
   flex-direction: column;
-  height: clamp(420px, calc(100vh - 260px), 720px);
+  height: 100%;
+  min-height: 240px;
 }
 
 .rail {
   display: flex;
   flex-direction: column;
   gap: var(--gap);
-  max-height: clamp(420px, calc(100vh - 260px), 720px);
+  height: 100%;
+  /* At least one mastery card stays visible; the rail scrolls beyond that. */
+  min-height: 220px;
   overflow-y: auto;
 }
 
@@ -216,13 +241,15 @@ input:focus {
   }
 
   .transcript-card {
-    height: 55vh;
-    min-height: 320px;
+    height: 45vh;
+    min-height: 240px;
   }
 
   .rail {
-    max-height: none;
-    overflow: visible;
+    height: auto;
+    max-height: 45vh;
+    min-height: 220px;
+    overflow-y: auto;
   }
 }
 
