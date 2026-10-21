@@ -37,6 +37,9 @@ concepts:
         url: https://www.khanacademy.org/math/statistics-probability/probability-library/basic-theoretical-probability
   - slug: fairness-comparing
     label: Fairness and comparing chances
+    references:
+      - title: Probability unit - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library
   - slug: experiment-vs-theory
     label: Experiment vs theory
     references:
@@ -54,3 +57,6 @@ concepts:
         url: https://www.khanacademy.org/math/statistics-probability/probability-library/multiplication-rule-dependent
   - slug: expected-value
     label: Expected value (stretch)
+    references:
+      - title: Probability unit - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library

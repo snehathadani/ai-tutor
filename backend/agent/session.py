@@ -253,6 +253,9 @@ async def run_session(
         if restored_concept and restored_concept in tutor.concept_by_slug:
             session_ctx.current_concept = restored_concept
             session_ctx._active_concept = restored_concept
+            # Publish it right after the room connects so the reference card
+            # is populated on rejoin, not only after the first problem.
+            session_ctx._concept_publish_pending = True
         agent = build_agent(settings, tutor, session_ctx, chat_ctx, mastery=mastery)
         session = lka.AgentSession(
             userdata=session_ctx,
@@ -305,6 +308,10 @@ async def run_session(
             student or "guest",
         )
         await session.start(agent=agent, room=ctx.room)
+
+        # Tell the browser which concept we are on so its reference card shows.
+        # Done before the greeting: the card should not wait for speech.
+        await session_ctx.publish_concept()
 
         # Greet immediately after the session is live: one short line over TTS
         # only, so the tutor is never silent on join even when the LLM is down.

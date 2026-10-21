@@ -79,6 +79,7 @@ class SessionContext:
                 reliable=True,
             )
             logger.debug("Published concept change: %s", self.current_concept)
+            logger.info("Published active concept %s to the room", self.current_concept)
         except Exception as exc:
             logger.warning("Failed to publish concept change: %s", exc)
         # Persist the position so a rejoin continues this concept rather than
