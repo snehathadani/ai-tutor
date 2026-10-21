@@ -322,6 +322,12 @@ class StateService:
         for turn in await self.get_transcript(tutor_id, sid):
             role = turn.get("role")
             text = (turn.get("text") or "").strip()
-            if role in ("user", "assistant") and text:
-                ctx.add_message(role=role, content=text)
+            if role not in ("user", "assistant") or not text:
+                continue
+            # Older builds persisted the join greeting, so a long-running room
+            # can hold a dozen identical hellos. They carry no teaching content
+            # and would just crowd the model's context.
+            if role == "assistant" and text.lower().startswith("welcome back!"):
+                continue
+            ctx.add_message(role=role, content=text)
         return ctx

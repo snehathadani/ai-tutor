@@ -233,16 +233,28 @@ export default function App() {
           );
           if (!res.ok) return;
           const prior = (await res.json()) as { role?: string; text?: string; ts?: number }[];
-          const seeded: Turn[] = prior
-            .filter((t) => (t.text ?? '').trim().length > 0)
-            .map((t, i) => ({
+          // Joining a room speaks a greeting every time. Older joins persisted
+          // those greetings, so drop them from restored history and collapse
+          // consecutive repeats; otherwise the panel shows a wall of hellos.
+          const isGreeting = (role: string, text: string) =>
+            role !== 'user' && /^welcome back!/i.test(text);
+          const restored: Turn[] = [];
+          for (const [i, t] of prior.entries()) {
+            const text = (t.text ?? '').trim();
+            if (!text) continue;
+            const role = t.role === 'user' ? 'user' : 'assistant';
+            if (isGreeting(role, text)) continue;
+            const last = restored[restored.length - 1];
+            if (last && last.role === role && last.text === text) continue;
+            restored.push({
               id: `prior-${i}`,
-              role: t.role === 'user' ? 'user' : 'assistant',
-              text: (t.text ?? '').trim(),
+              role,
+              text,
               ts: t.ts ?? Date.now(),
-            }));
-          if (seeded.length > 0) {
-            setTurns((prev) => [...seeded, ...prev]);
+            });
+          }
+          if (restored.length > 0) {
+            setTurns((prev) => [...restored, ...prev]);
           }
         } catch {
           // First visit to this room: nothing to restore.

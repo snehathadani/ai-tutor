@@ -44,6 +44,7 @@ def register_turn_persistence(
     session_ctx: SessionContext,
     session_id: str,
     connected: bool,
+    skip_texts: set[str] | None = None,
 ) -> set[asyncio.Task[None]]:
     """Register the conversation_item_added handler that persists turns.
 
@@ -64,6 +65,14 @@ def register_turn_persistence(
             for part in item.content:
                 if isinstance(part, str):
                     text += part
+            # The greeting is spoken on every join; persisting it would stack
+            # one "Welcome back" per rejoin and replay them all to the user.
+            if (
+                item.role == "assistant"
+                and skip_texts
+                and text.strip() in skip_texts
+            ):
+                return
             if connected:
                 try:
                     await state.add_transcript_turn(
@@ -135,26 +144,19 @@ def register_pipeline_logging(session: lka.AgentSession) -> None:
     session.on("agent_state_changed", _on_agent_state_changed)
 
 
-async def speak_greeting(
-    session: lka.AgentSession,
-    tutor: Tutor,
-    resumed: bool = False,
-    concept_label: str | None = None,
-) -> None:
-    """Speak the tutor's opening line via TTS only, with no LLM round-trip.
+async def speak_greeting(session: lka.AgentSession, line: str) -> None:
+    """Speak the opening line via TTS only, with no LLM round-trip.
 
     The greeting must be heard even when the LLM provider is unreachable, so
-    it goes straight to session.say. Playout is awaited under a timeout and
-    every failure is logged at ERROR; the session itself keeps running.
+    it goes straight to session.say. It is deliberately kept out of the chat
+    context: a resumed call already carries the conversation, and repeated
+    greetings in the model's history add nothing.
+
+    Playout is awaited under a timeout and every failure is logged at ERROR;
+    the session itself keeps running.
     """
-    if resumed:
-        line = "Welcome back! Let's pick up where we left off."
-        if concept_label:
-            line = f"Welcome back! Let's keep going with {concept_label}."
-    else:
-        line = tutor.greeting
     try:
-        handle = session.say(line, add_to_chat_ctx=True)
+        handle = session.say(line, add_to_chat_ctx=False)
     except Exception as exc:
         logger.error("Failed to start greeting speech: %s", exc)
         return
@@ -167,6 +169,15 @@ async def speak_greeting(
 
     if (exc := handle.exception()) is not None:
         logger.error("Greeting failed: %s", exc)
+
+
+def greeting_line(tutor: Tutor, resumed: bool, concept_label: str | None) -> str:
+    """The one line spoken on join, also used to keep it out of the transcript."""
+    if not resumed:
+        return tutor.greeting
+    if concept_label:
+        return f"Welcome back! Let's keep going with {concept_label}."
+    return "Welcome back! Let's pick up where we left off."
 
 
 async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> None:
@@ -234,6 +245,13 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
         agent = build_agent(settings, tutor, session_ctx, chat_ctx, mastery=mastery)
         session = lka.AgentSession(userdata=session_ctx)
 
+        concept_label = (
+            tutor.concept_by_slug[restored_concept].label
+            if restored_concept and restored_concept in tutor.concept_by_slug
+            else None
+        )
+        opening_line = greeting_line(tutor, resumed_turns > 0, concept_label)
+
         persist_tasks = register_turn_persistence(
             session,
             state=state,
@@ -241,6 +259,7 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
             session_ctx=session_ctx,
             session_id=session_id,
             connected=connected,
+            skip_texts={opening_line},
         )
         register_pipeline_logging(session)
 
@@ -268,17 +287,7 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
 
         # Greet immediately after the session is live: one short line over TTS
         # only, so the tutor is never silent on join even when the LLM is down.
-        concept_label = (
-            tutor.concept_by_slug[restored_concept].label
-            if restored_concept and restored_concept in tutor.concept_by_slug
-            else None
-        )
-        await speak_greeting(
-            session,
-            tutor,
-            resumed=resumed_turns > 0,
-            concept_label=concept_label,
-        )
+        await speak_greeting(session, opening_line)
 
         # Hold the entrypoint open for the whole call so persistence, mastery
         # and the concept position keep writing to Redis.
