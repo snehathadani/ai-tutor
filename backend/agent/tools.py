@@ -21,20 +21,28 @@ def _normalize(text: str) -> str:
     return re.sub(r"[^\w\s/\.\-]", "", text.lower().strip())
 
 
+def _numeric(text: str) -> str:
+    # Collapse spaces around a slash so "1 / 2" parses as one half, then keep
+    # the first token so trailing words ("24 books") still parse.
+    collapsed = re.sub(r"\s*/\s*", "/", _normalize(text))
+    return collapsed.split()[0] if collapsed else ""
+
+
 def _is_correct(given: str, answer_spec: dict[str, Any]) -> bool:
     given_clean = _normalize(given)
     acceptable = answer_spec.get("acceptable", [])
     for ans in acceptable:
         if given_clean == _normalize(ans):
             return True
+    given_numeric = _numeric(given)
     # Try fraction/numeric equivalence for answers containing a slash.
-    if "/" in given_clean:
+    if "/" in given_numeric:
         try:
-            given_frac = Fraction(given_clean.split()[0])
+            given_frac = Fraction(given_numeric)
             for ans in acceptable:
                 if "/" in ans:
                     try:
-                        ans_frac = Fraction(_normalize(ans).split()[0])
+                        ans_frac = Fraction(_numeric(ans))
                         if given_frac == ans_frac:
                             return True
                     except Exception:
@@ -43,10 +51,10 @@ def _is_correct(given: str, answer_spec: dict[str, Any]) -> bool:
             pass
     # Try float equivalence.
     try:
-        given_float = float(given_clean.split()[0])
+        given_float = float(given_numeric)
         for ans in acceptable:
             try:
-                if abs(given_float - float(_normalize(ans).split()[0])) < 1e-6:
+                if abs(given_float - float(_numeric(ans))) < 1e-6:
                     return True
             except Exception:
                 continue

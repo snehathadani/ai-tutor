@@ -125,7 +125,6 @@ problems:
     answer:
       acceptable:
         - hh ht th tt
-        - hh, ht, th, tt
         - heads heads, heads tails, tails heads, tails tails
       reason: There are four ordered outcomes.
       hint: List the result for the first coin and the second coin together.

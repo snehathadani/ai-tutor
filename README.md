@@ -92,7 +92,7 @@ Unknown `LLM_PROVIDER` values, or missing `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_
 1. **LiveKit Inference for STT/TTS** — Uses only `LIVEKIT_API_KEY`, so no extra Deepgram/Cartesia accounts are needed. Verified model ids from `livekit-agents` 1.8.8's inference registry:
    - STT: `deepgram/nova-3` (current documented default)
    - TTS: `cartesia/sonic-3.5` with Cartesia's "Ellie" default voice id `79a125e8-cd45-4c13-8a67-188112f4dd22`
-   
+
    Tradeoff: requires a LiveKit Cloud project and incurs Cloud inference usage.
 2. **Provider-neutral LLM wiring** — `livekit-plugins-openai` handles any OpenAI-compatible endpoint; `livekit-plugins-anthropic` handles Anthropic. The model string is passed verbatim, so new providers/models work by changing env vars. Tradeoff: we rely on each plugin's compatibility with the target API.
 3. **Redis as the only state store** — Keeps the API stateless and makes the agent the single writer. Tradeoff: Redis becomes a single point of availability; if it is down the API still serves health but returns 503 for state reads.
@@ -113,7 +113,7 @@ Today: one agent container and one API process handle one session per room in on
 
 ## How to run
 
-Two run paths; the compose file itself is standard `docker-compose.yml` syntax, so Docker users are unaffected by anything below.
+Three ways to run it: Docker, Podman, or natively. The compose file itself is standard `docker-compose.yml` syntax, so Docker users are unaffected by anything below.
 
 ### Docker (grader path)
 
@@ -122,6 +122,43 @@ cp .env.example .env
 # fill in LIVEKIT_*, LLM_*, etc.
 docker compose up --build
 ```
+
+### Build the images
+
+`docker compose up --build` builds and starts in one step. To build the images without starting them:
+
+```bash
+cp .env.example .env   # required: every service declares env_file: .env
+docker compose build            # builds api, agent, frontend
+docker compose build frontend   # one service only
+docker compose build --no-cache # full rebuild, ignores the layer cache
+docker compose build --pull     # also refresh the base images
+docker build -t ai-tutor-api ./backend      # build one image directly, no compose
+docker build -t ai-tutor-frontend ./frontend # same for the frontend
+```
+
+Three of the four services have a `build:` section, so `docker compose build` produces three
+images: `ai-tutor-api`, `ai-tutor-agent` and `ai-tutor-frontend`. The project name comes from the
+repository directory name, so renaming the folder renames the images. `redis` has no `build:`
+section; it is pulled from `docker.io/redis:7-alpine` instead, so use `docker compose pull` for it.
+
+Compose names the images `<project>-<service>`. `podman-compose` 1.0.6 uses `<project>_<service>`
+instead, so on this machine the same three images are tagged `ai-tutor_api`, `ai-tutor_agent` and
+`ai-tutor_frontend`.
+
+`api` and `agent` are built from the same `backend/Dockerfile` and the same context, so they end
+up with identical content under two names. `frontend` is a two-stage build: `node:22-alpine` runs
+`npm ci` and `npm run build`, and the result is copied into an `nginx:alpine` image that serves it
+on port 80.
+
+Podman equivalents, for the dev path on this machine:
+
+```bash
+podman-compose build
+podman-compose build --no-cache
+```
+
+`./scripts/dev-up.sh` builds and starts in one go.
 
 ### Podman (dev path on this machine)
 
@@ -134,7 +171,7 @@ The script exists because `podman-compose` 1.0.6 does not recreate containers on
 keeps serving the stale image after a rebuild. It therefore runs `down --remove-orphans` first and
 then `up -d --build --force-recreate`, so the freshly built image is always what actually serves.
 
-The frontend is on http://localhost:3000, API on http://localhost:8000/api.
+The frontend is on <http://localhost:3000>, API on <http://localhost:8000/api>.
 
 Redis is **not** published to the host anymore; the api and agent reach it on the internal compose
 network. If you run native dev with a host Redis, bind it to a non-default port (e.g. `6380`) to
@@ -142,17 +179,18 @@ avoid colliding with other services.
 
 ### Native dev
 
-Backend (Python 3.11 conda env used for validation; adjust for your own venv):
+Backend (validated on Python 3.11 and on 3.12 in the Docker image; any 3.11+ interpreter works):
 
 ```bash
+./scripts/dev-setup.sh   # creates backend/.venv and installs requirements (+ dev deps)
 cd backend
-/home/rohit/miniconda3/envs/llm/bin/python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
 cp ../.env.example ../.env  # fill it in
 # Point TUTORS_DIR at the repo-root tutors directory when running from backend/.
 TUTORS_DIR=../tutors python -m uvicorn api.main:app --reload --port 8000
 ```
+
+`scripts/dev-setup.sh` uses `python3` by default. On the original build machine the validated 3.11 interpreter lives at `/home/rohit/miniconda3/envs/llm/bin/python`; set `PYTHON=` to that path if you want the exact same environment. The project itself does not depend on that path. The script prefers `uv` when it is installed, otherwise falls back to `python -m venv` with an interpreter that has `ensurepip`, and bootstraps `pip` into a venv that lacks it (a `uv`-created venv has no `pip`). On Debian/Ubuntu the system Python also needs the `python3-venv` package (`apt install python3-venv`) for `python -m venv` to work.
 
 If your local Redis is on a different host port, set e.g. `REDIS_URL=redis://127.0.0.1:6380/0`. The default `TUTORS_DIR=./tutors` in `.env.example` works when running from the repo root; from `backend/` use `TUTORS_DIR=../tutors`.
 
@@ -171,6 +209,18 @@ cd frontend
 npm install
 npm run dev
 ```
+
+Frontend production build (what the Docker image does internally):
+
+```bash
+cd frontend
+npm run build     # tsc && vite build -> frontend/dist
+npm run preview   # serve the built bundle locally
+```
+
+`frontend/dist` is a build artifact and is not committed. The `frontend` Docker image runs
+`npm ci` and `npm run build` itself and serves `dist/` from nginx, so you only need this
+when you want a bundle outside Docker.
 
 Tests:
 
