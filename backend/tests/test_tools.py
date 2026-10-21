@@ -37,7 +37,7 @@ class _FakeRunContext(RunContext):
 
 @pytest.mark.asyncio
 async def test_get_problem_carries_concept_slug(state, probability_tutor):
-    session_ctx = SessionContext(session_id="s1", state=state, tutor=probability_tutor)
+    session_ctx = SessionContext(session_id="s1", state=state, tutor=probability_tutor, student="parth")
     ctx = _FakeRunContext(session_ctx)
     raw = await get_problem(ctx, "probability-fraction")
     result = json.loads(raw)
@@ -48,7 +48,7 @@ async def test_get_problem_carries_concept_slug(state, probability_tutor):
 
 @pytest.mark.asyncio
 async def test_grade_answer_updates_mastery(state, probability_tutor):
-    session_ctx = SessionContext(session_id="s1", state=state, tutor=probability_tutor)
+    session_ctx = SessionContext(session_id="s1", state=state, tutor=probability_tutor, student="parth")
     ctx = _FakeRunContext(session_ctx)
 
     # Serve a problem with a known concept.
@@ -60,7 +60,7 @@ async def test_grade_answer_updates_mastery(state, probability_tutor):
     raw = await grade_answer(ctx, problem_id, "99/100")
     result = json.loads(raw)
     assert result["correct"] is False
-    mastery = await state.get_mastery("probability")
+    mastery = await state.get_mastery("probability", "parth")
     assert mastery["probability-fraction"]["level"] == 0
     assert mastery["probability-fraction"]["total"] == 1
     assert mastery["probability-fraction"]["correct"] == 0
@@ -71,13 +71,13 @@ async def test_grade_answer_updates_mastery(state, probability_tutor):
     raw = await grade_answer(ctx, problem_id, "3/8")
     result = json.loads(raw)
     assert result["correct"] is True
-    mastery = await state.get_mastery("probability")
+    mastery = await state.get_mastery("probability", "parth")
     assert mastery["probability-fraction"]["correct"] == 1
 
 
 @pytest.mark.asyncio
 async def test_grade_answer_does_not_leak_answer(state, probability_tutor):
-    session_ctx = SessionContext(session_id="s1", state=state, tutor=probability_tutor)
+    session_ctx = SessionContext(session_id="s1", state=state, tutor=probability_tutor, student="parth")
     ctx = _FakeRunContext(session_ctx)
 
     await get_problem(ctx, "sample-space")
@@ -96,7 +96,7 @@ async def test_grade_answer_does_not_leak_answer(state, probability_tutor):
 
 @pytest.mark.asyncio
 async def test_grade_answer_fails_loudly_without_concept_slug(state, probability_tutor):
-    session_ctx = SessionContext(session_id="s1", state=state, tutor=probability_tutor)
+    session_ctx = SessionContext(session_id="s1", state=state, tutor=probability_tutor, student="parth")
     ctx = _FakeRunContext(session_ctx)
 
     # Manually inject a problem missing concept_slug.
@@ -115,14 +115,14 @@ async def test_grade_answer_fails_loudly_without_concept_slug(state, probability
 
 @pytest.mark.asyncio
 async def test_record_observation_rejects_neutral(state, probability_tutor):
-    session_ctx = SessionContext(session_id="s1", state=state, tutor=probability_tutor)
+    session_ctx = SessionContext(session_id="s1", state=state, tutor=probability_tutor, student="parth")
     ctx = _FakeRunContext(session_ctx)
 
     raw = await record_observation(ctx, "chance-words", "neutral")
     result = json.loads(raw)
     assert "error" in result
     assert result.get("recorded") is None
-    mastery = await state.get_mastery("probability")
+    mastery = await state.get_mastery("probability", "parth")
     assert mastery.get("chance-words", {}).get("total", 0) == 0
 
 
@@ -154,7 +154,7 @@ async def test_grade_answer_returns_hint_from_tutor_problem_bank(tmp_path, state
     )
     registry = TutorRegistry(tutors_dir)
     tutor = registry.get("fixture")
-    session_ctx = SessionContext(session_id="s1", state=state, tutor=tutor)
+    session_ctx = SessionContext(session_id="s1", state=state, tutor=tutor, student="parth")
     ctx = _FakeRunContext(session_ctx)
 
     await get_problem(ctx, "add")

@@ -3,6 +3,11 @@
 // `${participantId}:${segmentId}` so every re-delivery replaces the existing
 // turn in place instead of appending a new chat bubble per update, and so two
 // participants that happen to use the same segment ids cannot collide.
+//
+// TTS transcription is different: it emits one *new* id per phrase or sentence,
+// all final, which would render the tutor as a stack of fragments. Consecutive
+// final assistant segments are therefore joined into the preceding assistant
+// turn. A user turn in between breaks the run, so separate replies never merge.
 export interface Turn {
   id: string;
   role: 'user' | 'assistant';
@@ -30,10 +35,25 @@ export function mergeTranscriptionTurns(
       if (!existing.pending && existing.text === text) continue;
       if (next === prev) next = [...prev];
       next[index] = { ...existing, text, pending: !segment.final };
-    } else {
-      if (next === prev) next = [...prev];
-      next.push({ id: key, role, text, ts: Date.now(), pending: !segment.final });
+      continue;
     }
+
+    const last = next[next.length - 1];
+    if (
+      role === 'assistant' &&
+      segment.final &&
+      last !== undefined &&
+      last.role === 'assistant' &&
+      !last.pending
+    ) {
+      if (next === prev) next = [...prev];
+      const joined = `${last.text} ${text}`.replace(/\s+/g, ' ').trim();
+      next[next.length - 1] = { ...last, text: joined, ts: Date.now() };
+      continue;
+    }
+
+    if (next === prev) next = [...prev];
+    next.push({ id: key, role, text, ts: Date.now(), pending: !segment.final });
   }
   return next;
 }

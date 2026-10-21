@@ -2,13 +2,20 @@ import { useState } from 'react';
 
 interface Props {
   tutorId: string | null;
+  identity: string;
+  onIdentityChange: (value: string) => void;
   onConnect: (room: string, identity: string, tutorId: string) => void;
   disabled?: boolean;
 }
 
-export default function ConnectPanel({ tutorId, onConnect, disabled }: Props) {
+export default function ConnectPanel({
+  tutorId,
+  identity,
+  onIdentityChange,
+  onConnect,
+  disabled,
+}: Props) {
   const [room, setRoom] = useState('room');
-  const [identity, setIdentity] = useState('student');
   const isDisabled = disabled || !tutorId;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -31,7 +38,7 @@ export default function ConnectPanel({ tutorId, onConnect, disabled }: Props) {
         />
         <input
           value={identity}
-          onChange={(e) => setIdentity(e.target.value)}
+          onChange={(e) => onIdentityChange(e.target.value)}
           placeholder="Your name"
           disabled={isDisabled}
           aria-label="Your name"

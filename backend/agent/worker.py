@@ -5,12 +5,14 @@ import json
 import logging
 import sys
 
+from typing import Any
+
 import livekit.agents as lka
 import livekit.api as lkapi
 
 from agent.session import finalize_session, run_session
 from lib.config import AGENT_NAME, VALID_LLM_PROVIDERS, Settings, get_settings
-from lib.tutors import TutorNotFound, TutorRegistry
+from lib.tutors import Tutor, TutorNotFound, TutorRegistry
 
 
 def _preflight(settings: Settings) -> None:
@@ -70,8 +72,9 @@ async def _check_livekit(settings: Settings) -> None:
         )
 
 
-def _tutor_from_metadata(ctx: lka.JobContext, registry: TutorRegistry):
-    metadata = {}
+def _session_from_metadata(ctx: lka.JobContext, registry: TutorRegistry) -> tuple[Tutor, str]:
+    """Resolve the tutor and student carried by the dispatch metadata."""
+    metadata: dict[str, Any] = {}
     if ctx.job.metadata:
         try:
             metadata = json.loads(ctx.job.metadata)
@@ -80,8 +83,9 @@ def _tutor_from_metadata(ctx: lka.JobContext, registry: TutorRegistry):
     tutor_id = metadata.get("tutor_id")
     if not tutor_id:
         raise RuntimeError("No tutor_id in dispatch metadata")
+    student = str(metadata.get("student") or "").strip()
     try:
-        return registry.get(tutor_id)
+        return registry.get(tutor_id), student
     except TutorNotFound as exc:
         raise RuntimeError(str(exc)) from exc
 
@@ -94,19 +98,20 @@ def _tutor_from_metadata(ctx: lka.JobContext, registry: TutorRegistry):
 async def entrypoint(ctx: lka.JobContext) -> None:
     settings = get_settings()
     registry = TutorRegistry(settings.tutors_dir)
-    tutor = _tutor_from_metadata(ctx, registry)
-    await run_session(ctx, settings, tutor)
+    tutor, student = _session_from_metadata(ctx, registry)
+    await run_session(ctx, settings, tutor, student)
 
 
 async def on_session_end(ctx: lka.JobContext) -> None:
     settings = get_settings()
     registry = TutorRegistry(settings.tutors_dir)
     tutor: Tutor | None = None
+    student = ""
     try:
-        tutor = _tutor_from_metadata(ctx, registry)
+        tutor, student = _session_from_metadata(ctx, registry)
     except Exception as exc:
         logging.warning("Could not resolve tutor for session end: %s", exc)
-    await finalize_session(ctx, settings, tutor)
+    await finalize_session(ctx, settings, tutor, student)
 
 
 def main() -> None:

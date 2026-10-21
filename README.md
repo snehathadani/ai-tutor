@@ -192,18 +192,27 @@ This means the worker does **not** need to be running before the participant joi
 
 ## Redis key reset
 
-Mastery and sessions are now namespaced per tutor:
+Mastery belongs to the **student**, conversations belong to the **room**:
 
-- `tutor:{tutor_id}:mastery`
+- `tutor:{tutor_id}:student:{student}:mastery`
 - `tutor:{tutor_id}:sessions`
 - `tutor:{tutor_id}:session:{sid}:transcript`
 - `tutor:{tutor_id}:session:{sid}:meta`
 - `tutor:{tutor_id}:session:{sid}:summary`
 - `tutor:{tutor_id}:session:{sid}:chat_ctx`
 
+The student segment is normalised from the name entered before connecting
+(lowercase, spaces and punctuation collapsed), so `Parth`, `parth` and
+` Parth ` share one record, and an empty name falls back to `guest`. Progress
+follows the student across rooms: joining a different room continues their
+mastery, while the transcript and summary stay per room. `GET /api/mastery`
+requires both `tutor` and `student`.
+
 The old global `tutor:user:mastery` / `tutor:user:sessions` / `tutor:session:{sid}:...`
-keys from earlier versions are no longer read or written. There is no migration shim;
-deployments using the old keys will start with empty per-tutor state.
+keys from earlier versions are no longer read or written; nor is the interim
+`tutor:{tutor_id}:mastery` key. Deployments using those keys start with empty
+per-student state, unless the operator copies the old hash to
+`tutor:{tutor_id}:student:<name>:mastery`.
 
 ## What is untested
 

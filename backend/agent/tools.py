@@ -119,7 +119,9 @@ async def grade_answer(ctx: RunContext, problem_id: str, student_answer: str) ->
             }
         )
     correct = _is_correct(student_answer, problem["answer"])
-    await session_ctx.state.update_mastery(session_ctx.tutor.id, concept, correct=correct, weight=1.0)
+    await session_ctx.state.update_mastery(
+        session_ctx.tutor.id, session_ctx.student, concept, correct=correct, weight=1.0
+    )
     if correct:
         session_ctx.clear_problem()
         await session_ctx.publish_concept()
@@ -155,7 +157,9 @@ async def record_observation(ctx: RunContext, concept_slug: str, signal: str) ->
     session_ctx = _ctx(ctx)
     if concept_slug not in session_ctx.tutor.concept_by_slug:
         return json.dumps({"error": f"Unknown concept: {concept_slug}"})
-    await session_ctx.state.record_observation(session_ctx.tutor.id, concept_slug, signal)
+    await session_ctx.state.record_observation(
+        session_ctx.tutor.id, session_ctx.student, concept_slug, signal
+    )
     return json.dumps({"recorded": True, "concept_slug": concept_slug, "signal": signal})
 
 
@@ -164,5 +168,7 @@ async def get_mastery(ctx: RunContext) -> str:
     """Read the student's current mastery snapshot."""
     logger.info("tool get_mastery()")
     session_ctx = _ctx(ctx)
-    mastery = await session_ctx.state.get_mastery(session_ctx.tutor.id)
+    mastery = await session_ctx.state.get_mastery(
+        session_ctx.tutor.id, session_ctx.student
+    )
     return json.dumps(mastery)

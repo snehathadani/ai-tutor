@@ -3,6 +3,9 @@
 // Kept out of tsconfig's `include` (src only), so tsc --noEmit does not gate it.
 import { mergeTranscriptionTurns, type Turn } from '../src/transcript.ts';
 
+// Node globals, declared locally so this script needs no @types/node.
+declare const process: { exit(code: number): never };
+
 let passed = 0;
 const failures: string[] = [];
 
@@ -107,6 +110,32 @@ turns = mergeTranscriptionTurns(turns, [{ id: 'shared', text: 'from user, still 
 const userTurn = turns.find((t) => t.id === 'user-1:shared');
 check('interim update of existing turn is flagged pending', userTurn?.pending === true, `got ${userTurn?.pending}`);
 check('interim update replaces text in place', turns.length === 2 && userTurn?.text === 'from user, still speaking');
+
+// 8. TTS emits one final segment per phrase with fresh ids. Those must read as
+// one reply, not a stack of fragments.
+turns = [];
+turns = mergeTranscriptionTurns(turns, [{ id: 't1', text: 'Think about a fair coin.', final: true }], 'assistant', 'agent-1');
+turns = mergeTranscriptionTurns(turns, [{ id: 't2', text: 'What are the two possible outcomes?', final: true }], 'assistant', 'agent-1');
+check('consecutive assistant finals join into one turn', turns.length === 1, `got ${turns.length}`);
+check(
+  'joined text reads as one reply',
+  turns[0]?.text === 'Think about a fair coin. What are the two possible outcomes?',
+  `got "${turns[0]?.text}"`
+);
+
+// 9. A user turn between two replies breaks the run.
+turns = mergeTranscriptionTurns(turns, [{ id: 'u1', text: 'Heads and tails.', final: true }], 'user', USER);
+turns = mergeTranscriptionTurns(turns, [{ id: 't3', text: 'Nice. So what is the chance of heads?', final: true }], 'assistant', 'agent-1');
+check('assistant replies do not merge across a user turn', turns.length === 3, `got ${turns.length}`);
+check(
+  'the later reply stays its own turn',
+  turns[2]?.text === 'Nice. So what is the chance of heads?',
+  `got "${turns[2]?.text}"`
+);
+
+// 10. An interim assistant segment is not merged into the previous final turn.
+turns = mergeTranscriptionTurns(turns, [{ id: 't4', text: 'And if we flip tw' }], 'assistant', 'agent-1');
+check('interim assistant segment starts a new pending turn', turns.length === 4 && turns[3]?.pending === true);
 
 if (failures.length > 0) {
   console.error(`\n${failures.length} assertion(s) failed`);

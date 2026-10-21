@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -15,13 +16,26 @@ logger = logging.getLogger(__name__)
 
 NAMESPACE = "tutor"
 
-# Called with (tutor_id, slug) after every mastery write so a live session can
-# push the change to the browser instead of waiting for its next poll.
-MasteryListener = Callable[[str, str], Awaitable[None]]
+# Called with (tutor_id, student, slug) after every mastery write so a live
+# session can push the change to the browser instead of waiting for its next poll.
+MasteryListener = Callable[[str, str, str], Awaitable[None]]
 
 
-def _mastery_key(tutor_id: str) -> str:
-    return f"{NAMESPACE}:{tutor_id}:mastery"
+def normalize_student(student: str | None) -> str:
+    """Turn a display name into a stable Redis key segment.
+
+    Mastery belongs to the student, not the room: "Parth", "parth" and
+    " Parth " are the same learner, and an empty name falls back to a shared
+    guest record rather than a new key per session.
+    """
+    value = (student or "").strip().lower()
+    if not value:
+        return "guest"
+    return re.sub(r"[^a-z0-9._-]+", "-", value).strip("-") or "guest"
+
+
+def _mastery_key(tutor_id: str, student: str) -> str:
+    return f"{NAMESPACE}:{tutor_id}:student:{normalize_student(student)}:mastery"
 
 
 def _sessions_zset_key(tutor_id: str) -> str:
@@ -139,9 +153,11 @@ class StateService:
             logger.error("Redis error during %s: %s", operation, exc)
             raise StateError(f"Redis unavailable ({operation}): {exc}") from exc
 
-    async def get_mastery(self, tutor_id: str) -> dict[str, dict[str, Any]]:
+    async def get_mastery(self, tutor_id: str, student: str) -> dict[str, dict[str, Any]]:
         r = self._ensure()
-        data = await self._safe(r.hgetall(_mastery_key(tutor_id)), "get_mastery")
+        data = await self._safe(
+            r.hgetall(_mastery_key(tutor_id, student)), "get_mastery"
+        )
         result: dict[str, dict[str, Any]] = {}
         for slug, raw in data.items():
             record = json.loads(raw)
@@ -150,10 +166,15 @@ class StateService:
         return result
 
     async def update_mastery(
-        self, tutor_id: str, slug: str, correct: bool, weight: float = 1.0
+        self,
+        tutor_id: str,
+        student: str,
+        slug: str,
+        correct: bool,
+        weight: float = 1.0,
     ) -> None:
         r = self._ensure()
-        key = _mastery_key(tutor_id)
+        key = _mastery_key(tutor_id, student)
         raw = await self._safe(r.hget(key, slug), "update_mastery")
         record = json.loads(raw) if raw else _default_concept()
         record["total"] = record.get("total", 0) + 1
@@ -167,9 +188,9 @@ class StateService:
             record["streak"] = 0
         record["level"] = _effective_level(record)
         await self._safe(r.hset(key, slug, json.dumps(record)), "update_mastery")
-        await self._notify_mastery_update(tutor_id, slug)
+        await self._notify_mastery_update(tutor_id, student, slug)
 
-    async def mark_covered(self, tutor_id: str, slug: str) -> None:
+    async def mark_covered(self, tutor_id: str, student: str, slug: str) -> None:
         """Mark a concept as covered: the student worked through it and moved on.
 
         Coverage is progress, not mastery, so `correct`/`total` are left
@@ -177,7 +198,7 @@ class StateService:
         mastery level is used above that.
         """
         r = self._ensure()
-        key = _mastery_key(tutor_id)
+        key = _mastery_key(tutor_id, student)
         raw = await self._safe(r.hget(key, slug), "mark_covered")
         record = json.loads(raw) if raw else _default_concept()
         record["covered"] = True
@@ -185,24 +206,32 @@ class StateService:
         record["updated_ts"] = record["covered_ts"]
         record["level"] = _effective_level(record)
         await self._safe(r.hset(key, slug, json.dumps(record)), "mark_covered")
-        await self._notify_mastery_update(tutor_id, slug)
+        await self._notify_mastery_update(tutor_id, student, slug)
 
-    async def _notify_mastery_update(self, tutor_id: str, slug: str) -> None:
+    async def _notify_mastery_update(
+        self, tutor_id: str, student: str, slug: str
+    ) -> None:
         """Tell the listener that mastery changed so it can be pushed out."""
         if self.on_mastery_update is None:
             return
         try:
-            await self.on_mastery_update(tutor_id, slug)
+            await self.on_mastery_update(tutor_id, student, slug)
         except Exception as exc:
             logger.warning(
-                "Mastery update listener failed for %s/%s: %s", tutor_id, slug, exc
+                "Mastery update listener failed for %s/%s/%s: %s",
+                tutor_id,
+                student,
+                slug,
+                exc,
             )
 
-    async def record_observation(self, tutor_id: str, slug: str, signal: str) -> None:
+    async def record_observation(
+        self, tutor_id: str, student: str, slug: str, signal: str
+    ) -> None:
         if signal not in ("got_it", "struggling"):
             return
         correct = signal == "got_it"
-        await self.update_mastery(tutor_id, slug, correct=correct, weight=0.5)
+        await self.update_mastery(tutor_id, student, slug, correct=correct, weight=0.5)
 
     async def add_transcript_turn(
         self, tutor_id: str, sid: str, role: str, text: str, concept: str | None = None

@@ -66,6 +66,7 @@ class TokenResponse(BaseModel):
 class DispatchRequest(BaseModel):
     room: str
     tutor_id: str
+    student: str = ""
 
 
 class DispatchResponse(BaseModel):
@@ -108,7 +109,9 @@ def _validate_room_for_tutor(room: str, tutor_id: str) -> None:
         )
 
 
-async def _dispatch_agent(room: str, tutor_id: str, settings: Settings) -> Optional[str]:
+async def _dispatch_agent(
+    room: str, tutor_id: str, settings: Settings, student: str = ""
+) -> Optional[str]:
     """Request an explicit agent dispatch for a room. Returns an error message
     on failure, or None on success."""
     try:
@@ -122,7 +125,9 @@ async def _dispatch_agent(room: str, tutor_id: str, settings: Settings) -> Optio
                     lkapi.CreateAgentDispatchRequest(
                         room=room,
                         agent_name=AGENT_NAME,
-                        metadata=json.dumps({"tutor_id": tutor_id}),
+                        metadata=json.dumps(
+                            {"tutor_id": tutor_id, "student": student}
+                        ),
                     )
                 ),
                 timeout=5.0,
@@ -228,7 +233,9 @@ async def mint_token(
     except Exception as exc:
         logger.error("Failed to mint token: %s", exc)
         raise HTTPException(status_code=500, detail="Could not mint LiveKit token") from exc
-    dispatch_error = await _dispatch_agent(body.room, body.tutor_id, settings)
+    dispatch_error = await _dispatch_agent(
+        body.room, body.tutor_id, settings, body.identity
+    )
     return TokenResponse(token=token, url=settings.livekit_url, dispatch_error=dispatch_error)
 
 
@@ -239,18 +246,21 @@ async def dispatch_agent(
 ) -> DispatchResponse:
     _ensure_tutor(body.tutor_id)
     _validate_room_for_tutor(body.room, body.tutor_id)
-    error = await _dispatch_agent(body.room, body.tutor_id, settings)
+    error = await _dispatch_agent(body.room, body.tutor_id, settings, body.student)
     if error:
         return DispatchResponse(dispatched=False, error=error)
     return DispatchResponse(dispatched=True)
 
 
 @app.get("/api/mastery")
-async def get_mastery(tutor: str = Query(..., alias="tutor")) -> dict[str, Any]:
+async def get_mastery(
+    tutor: str = Query(..., alias="tutor"),
+    student: str = Query(..., alias="student"),
+) -> dict[str, Any]:
     _ensure_tutor(tutor)
     if state_service is None:
         raise StateError("State service not initialized")
-    raw = await state_service.get_mastery(tutor)
+    raw = await state_service.get_mastery(tutor, student)
     tutor_obj = _get_registry().get(tutor)
     concepts = []
     for concept in tutor_obj.concepts:

@@ -17,6 +17,8 @@ interface Props {
   tutor: Tutor | null;
   /** Concept the agent is currently working on; highlighted in the grid. */
   activeConcept?: string | null;
+  /** Learner whose progress is shown; mastery is stored per student. */
+  student: string;
   /** Bumped by the parent whenever the agent reports a mastery change. */
   refreshKey?: number;
 }
@@ -75,7 +77,12 @@ function progressDetail(
   return `${head} \u00b7 ${score} \u00b7 ${hint}`;
 }
 
-export default function MasteryPanel({ tutor, activeConcept, refreshKey = 0 }: Props) {
+export default function MasteryPanel({
+  tutor,
+  student,
+  activeConcept,
+  refreshKey = 0,
+}: Props) {
   const [concepts, setConcepts] = useState<Concept[]>([]);
   const [failureCount, setFailureCount] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -92,9 +99,11 @@ export default function MasteryPanel({ tutor, activeConcept, refreshKey = 0 }: P
   }, []);
 
   const fetchMastery = useCallback(async () => {
-    if (!tutor) return;
+    if (!tutor || !student.trim()) return;
     try {
-      const res = await fetch(`/api/mastery?tutor=${encodeURIComponent(tutor.id)}`);
+      const res = await fetch(
+        `/api/mastery?tutor=${encodeURIComponent(tutor.id)}&student=${encodeURIComponent(student)}`
+      );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { concepts: Concept[] };
       if (!mountedRef.current) return;
@@ -109,10 +118,10 @@ export default function MasteryPanel({ tutor, activeConcept, refreshKey = 0 }: P
       setFailureCount((n) => n + 1);
       setLastError(err instanceof Error ? err.message : String(err));
     }
-  }, [tutor]);
+  }, [tutor, student]);
 
   useEffect(() => {
-    if (!tutor) {
+    if (!tutor || !student.trim()) {
       setConcepts([]);
       setFailureCount(0);
       setLastError(null);
@@ -149,6 +158,17 @@ export default function MasteryPanel({ tutor, activeConcept, refreshKey = 0 }: P
   }
 
   const persistentError = failureCount >= FAILURE_ERROR_THRESHOLD;
+
+  if (!student.trim()) {
+    return (
+      <div className="card">
+        <h2>Mastery</h2>
+        <div className="status" style={{ marginTop: '0.75rem' }}>
+          Enter your name to see your progress. Each student keeps their own.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="card">

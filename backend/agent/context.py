@@ -16,6 +16,7 @@ class SessionContext:
     session_id: str
     state: StateService
     tutor: Tutor
+    student: str = "guest"
     room: Any | None = None
     current_problem: dict[str, Any] | None = None
     current_concept: str | None = field(default=None, init=False)
@@ -102,11 +103,13 @@ class SessionContext:
             return
         self._left_concept = None
         try:
-            await self.state.mark_covered(self.tutor.id, slug)
+            await self.state.mark_covered(self.tutor.id, self.student, slug)
         except Exception as exc:
             logger.warning("Failed to mark concept %s as covered: %s", slug, exc)
 
-    async def _publish_mastery_update(self, tutor_id: str, slug: str) -> None:
+    async def _publish_mastery_update(
+        self, tutor_id: str, student: str, slug: str
+    ) -> None:
         """Push a mastery change to the room so the UI updates right away."""
         if self.room is None:
             return

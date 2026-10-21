@@ -99,6 +99,24 @@ export default function App() {
   const [tutors, setTutors] = useState<Tutor[]>([]);
   const [invalidTutors, setInvalidTutors] = useState<{ id?: string; error: string }[]>([]);
   const [selectedTutor, setSelectedTutor] = useState<Tutor | null>(null);
+  // Mastery belongs to the student, so the name is lifted here: it feeds the
+  // token, the dispatch metadata and the mastery panel, and survives a reload.
+  const [student, setStudent] = useState<string>(() => {
+    try {
+      return localStorage.getItem('tutor.student') ?? 'student';
+    } catch {
+      return 'student';
+    }
+  });
+
+  const handleStudentChange = useCallback((value: string) => {
+    setStudent(value);
+    try {
+      localStorage.setItem('tutor.student', value);
+    } catch {
+      // Storage unavailable (private mode): the name still works this session.
+    }
+  }, []);
   const [activeConcept, setActiveConcept] = useState<string | null>(null);
   // Bumped whenever the agent reports a mastery change, so the panel refetches
   // immediately instead of waiting for its next poll.
@@ -190,7 +208,7 @@ export default function App() {
         const res = await fetch('/api/dispatch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ room: roomName, tutor_id: tutorId }),
+          body: JSON.stringify({ room: roomName, tutor_id: tutorId, student }),
         });
         const data = (await res.json()) as { dispatched: boolean; error?: string };
         if (!res.ok || !data.dispatched) {
@@ -616,6 +634,8 @@ export default function App() {
 
       <ConnectPanel
         tutorId={selectedTutor?.id ?? null}
+        identity={student}
+        onIdentityChange={handleStudentChange}
         onConnect={handleConnect}
         disabled={connectionState === ConnectionState.Connecting || !!room}
       />
@@ -677,6 +697,7 @@ export default function App() {
           <LinkCard tutor={selectedTutor} activeConcept={activeConcept} onClear={() => setActiveConcept(null)} />
           <MasteryPanel
             tutor={selectedTutor}
+            student={student}
             activeConcept={activeConcept}
             refreshKey={masteryRefreshKey}
           />

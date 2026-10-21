@@ -148,7 +148,7 @@ def test_dispatch_reports_failure_for_fake_credentials(client):
 
 
 def test_mastery_and_sessions(client):
-    r = client.get("/api/mastery?tutor=probability")
+    r = client.get("/api/mastery?tutor=probability&student=parth")
     assert r.status_code == 200
     assert "concepts" in r.json()
 

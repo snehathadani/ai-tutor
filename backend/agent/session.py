@@ -180,7 +180,9 @@ def greeting_line(tutor: Tutor, resumed: bool, concept_label: str | None) -> str
     return "Welcome back! Let's pick up where we left off."
 
 
-async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> None:
+async def run_session(
+    ctx: lka.JobContext, settings: Settings, tutor: Tutor, student: str = "guest"
+) -> None:
     session_id = ctx.room.name
     state = StateService(settings.redis_url)
     connected = False
@@ -219,7 +221,7 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
             except Exception as exc:
                 logger.error("Failed to load session position: %s", exc)
             try:
-                mastery = await state.get_mastery(tutor.id)
+                mastery = await state.get_mastery(tutor.id, student)
             except Exception as exc:
                 logger.error("Failed to load mastery: %s", exc)
 
@@ -237,7 +239,11 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
         chat_ctx = ChatContext(items=history)
 
         session_ctx = SessionContext(
-            session_id=session_id, state=state, tutor=tutor, room=ctx.room
+            session_id=session_id,
+            state=state,
+            tutor=tutor,
+            student=student,
+            room=ctx.room,
         )
         if restored_concept and restored_concept in tutor.concept_by_slug:
             session_ctx.current_concept = restored_concept
@@ -282,7 +288,12 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
             except Exception as exc:
                 logger.error("Failed to record session start: %s", exc)
 
-        logger.info("Starting voice session %s for tutor %s", session_id, tutor.id)
+        logger.info(
+            "Starting voice session %s for tutor %s, student %s",
+            session_id,
+            tutor.id,
+            student or "guest",
+        )
         await session.start(agent=agent, room=ctx.room)
 
         # Greet immediately after the session is live: one short line over TTS
@@ -312,7 +323,12 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
             logger.warning("Error closing Redis in run_session: %s", exc)
 
 
-async def finalize_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor | None) -> None:
+async def finalize_session(
+    ctx: lka.JobContext,
+    settings: Settings,
+    tutor: Tutor | None,
+    student: str = "guest",
+) -> None:
     session_id = ctx.room.name
     state = StateService(settings.redis_url)
     try:
@@ -325,7 +341,7 @@ async def finalize_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor
         try:
             tutor_id = tutor.id if tutor else session_id.split("-")[0]
             transcript = await state.get_transcript(tutor_id, session_id)
-            mastery = await state.get_mastery(tutor_id)
+            mastery = await state.get_mastery(tutor_id, student)
             summary = await generate_session_summary(settings, transcript, mastery, tutor)
             await state.end_session(tutor_id, session_id, summary=summary)
             if summary is not None:

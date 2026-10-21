@@ -15,14 +15,20 @@ async def state():
 
 @pytest.mark.asyncio
 async def test_mastery_updates(state):
-    await state.update_mastery("probability", "probability-fraction", correct=True, weight=1.0)
-    mastery = await state.get_mastery("probability")
+    await state.update_mastery(
+        "probability", "parth", "probability-fraction", correct=True, weight=1.0
+    )
+    mastery = await state.get_mastery("probability", "parth")
     assert mastery["probability-fraction"]["level"] == 1
     assert mastery["probability-fraction"]["correct"] == 1
 
-    await state.update_mastery("probability", "probability-fraction", correct=True, weight=1.0)
-    await state.update_mastery("probability", "probability-fraction", correct=True, weight=1.0)
-    mastery = await state.get_mastery("probability")
+    await state.update_mastery(
+        "probability", "parth", "probability-fraction", correct=True, weight=1.0
+    )
+    await state.update_mastery(
+        "probability", "parth", "probability-fraction", correct=True, weight=1.0
+    )
+    mastery = await state.get_mastery("probability", "parth")
     assert mastery["probability-fraction"]["level"] == 2
 
 
@@ -59,17 +65,33 @@ async def test_chat_context_roundtrip(state):
 @pytest.mark.asyncio
 async def test_mastery_isolation_across_tutors(state):
     slug = "probability-fraction"
-    await state.update_mastery("tutor-a", slug, correct=True, weight=1.0)
-    await state.update_mastery("tutor-b", slug, correct=False, weight=1.0)
+    await state.update_mastery("tutor-a", "parth", slug, correct=True, weight=1.0)
+    await state.update_mastery("tutor-b", "parth", slug, correct=False, weight=1.0)
 
-    mastery_a = await state.get_mastery("tutor-a")
-    mastery_b = await state.get_mastery("tutor-b")
+    mastery_a = await state.get_mastery("tutor-a", "parth")
+    mastery_b = await state.get_mastery("tutor-b", "parth")
 
     assert mastery_a[slug]["level"] == 1
     assert mastery_a[slug]["correct"] == 1
     assert mastery_b[slug]["level"] == 0
-    assert mastery_b[slug]["correct"] == 0
-    assert mastery_b[slug]["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_mastery_isolation_across_students(state):
+    slug = "probability-fraction"
+    await state.update_mastery("probability", "parth", slug, correct=True, weight=1.0)
+    await state.update_mastery("probability", "asha", slug, correct=False, weight=1.0)
+
+    parth = await state.get_mastery("probability", "parth")
+    asha = await state.get_mastery("probability", "asha")
+
+    assert parth[slug]["level"] == 1
+    assert asha[slug]["level"] == 0
+    # Display-name variations resolve to the same learner.
+    same = await state.get_mastery("probability", "  PARTH ")
+    assert same[slug]["correct"] == 1
+    assert asha[slug]["correct"] == 0
+    assert asha[slug]["total"] == 1
 
 
 @pytest.mark.asyncio
