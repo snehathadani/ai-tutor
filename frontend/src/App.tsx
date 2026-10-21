@@ -11,7 +11,7 @@ import {
 } from 'livekit-client';
 
 import ConnectPanel from './components/ConnectPanel';
-import { mergeTranscriptionTurns, type Turn } from './transcript';
+import { mergeTranscriptionTurns, sanitizeModelText, type Turn } from './transcript';
 import MasteryPanel from './components/MasteryPanel';
 import SummaryView from './components/SummaryView';
 import TranscriptPanel from './components/TranscriptPanel';
@@ -258,7 +258,7 @@ export default function App() {
             role !== 'user' && /^welcome back!/i.test(text);
           const restored: Turn[] = [];
           for (const [i, t] of prior.entries()) {
-            const text = (t.text ?? '').trim();
+            const text = sanitizeModelText(t.text ?? '');
             if (!text) continue;
             const role = t.role === 'user' ? 'user' : 'assistant';
             if (isGreeting(role, text)) continue;

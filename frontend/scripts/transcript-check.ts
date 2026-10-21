@@ -137,6 +137,29 @@ check(
 turns = mergeTranscriptionTurns(turns, [{ id: 't4', text: 'And if we flip tw' }], 'assistant', 'agent-1');
 check('interim assistant segment starts a new pending turn', turns.length === 4 && turns[3]?.pending === true);
 
+// 11. Leaked DSML tool markup is stripped, never rendered or merged.
+turns = [];
+turns = mergeTranscriptionTurns(
+  turns,
+  [
+    {
+      id: 'd1',
+      text: 'Nice work! <｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name="get_problem"> x </｜｜DSML｜｜ calls>',
+      final: true,
+    },
+  ],
+  'assistant',
+  'agent-1'
+);
+check('leaked DSML markup is stripped from speech', turns[0]?.text === 'Nice work!', `got "${turns[0]?.text}"`);
+turns = mergeTranscriptionTurns(
+  turns,
+  [{ id: 'd2', text: '<｜｜DSML｜｜ calls> </｜｜DSML｜｜ calls>', final: true }],
+  'assistant',
+  'agent-1'
+);
+check('markup-only segment is dropped', turns.length === 1, `got ${turns.length}`);
+
 if (failures.length > 0) {
   console.error(`\n${failures.length} assertion(s) failed`);
   process.exit(1);

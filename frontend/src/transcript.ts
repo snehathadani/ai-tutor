@@ -17,6 +17,17 @@ export interface Turn {
   pending?: boolean;
 }
 
+// DeepSeek sometimes emits its internal tool syntax as plain text:
+//   <｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name="get_problem"> ... </｜｜DSML｜｜ calls>
+// That is not speech, so it must never render. The block always runs to the end
+// of the turn, so dropping from the marker onwards is safe.
+const DSML_MARKER = /<[｜|]{2}\s*DSML/i;
+
+export function sanitizeModelText(text: string): string {
+  const match = text.search(DSML_MARKER);
+  return (match === -1 ? text : text.slice(0, match)).trim();
+}
+
 export function mergeTranscriptionTurns(
   prev: Turn[],
   segments: ReadonlyArray<{ id: string; text: string; final?: boolean }>,
@@ -25,7 +36,7 @@ export function mergeTranscriptionTurns(
 ): Turn[] {
   let next = prev;
   for (const segment of segments) {
-    const text = (segment.text ?? '').trim();
+    const text = sanitizeModelText(segment.text ?? '');
     if (!text) continue;
     const key = `${participantId}:${segment.id}`;
     const index = next.findIndex((turn) => turn.id === key);

@@ -10,6 +10,7 @@ from livekit.agents.llm import ChatContext, ChatMessage
 from agent.context import SessionContext
 from agent.conversation import build_agent
 from agent.summary import generate_session_summary
+from agent.text_filters import strip_dsml_stream, strip_dsml_text
 from lib.config import Settings
 from lib.state import StateError, StateService
 from lib.tutors import Tutor
@@ -65,6 +66,10 @@ def register_turn_persistence(
             for part in item.content:
                 if isinstance(part, str):
                     text += part
+            # Leaked tool markup is not speech: never store it.
+            text = strip_dsml_text(text)
+            if not text:
+                return
             # The greeting is spoken on every join; persisting it would stack
             # one "Welcome back" per rejoin and replay them all to the user.
             if (
@@ -249,7 +254,12 @@ async def run_session(
             session_ctx.current_concept = restored_concept
             session_ctx._active_concept = restored_concept
         agent = build_agent(settings, tutor, session_ctx, chat_ctx, mastery=mastery)
-        session = lka.AgentSession(userdata=session_ctx)
+        session = lka.AgentSession(
+            userdata=session_ctx,
+            # Keep the SDK's markdown/emoji filters, and drop any leaked
+            # DeepSeek tool markup before it is synthesised.
+            tts_text_transforms=["filter_markdown", "filter_emoji", strip_dsml_stream],
+        )
 
         concept_label = (
             tutor.concept_by_slug[restored_concept].label
