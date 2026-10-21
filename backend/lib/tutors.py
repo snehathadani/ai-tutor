@@ -6,20 +6,19 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, HttpUrl, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
 
 class Reference(BaseModel):
     title: str
-    url: HttpUrl
+    url: str
 
 
 class Concept(BaseModel):
     slug: str
     label: str
-    intro: str | None = None
     references: list[Reference] = Field(default_factory=list)
 
 
@@ -73,7 +72,8 @@ class TutorRegistry:
 
     Layout: <tutors_dir>/<id>/tutor.yaml and optional <id>/problems.yaml.
     The directory name is the canonical tutor id. The registry caches by
-    file mtime and reloads automatically when files change. One invalid
+    file (mtime_ns, size) and reloads automatically when files change, so
+    a same-second edit with a different size is still picked up. One invalid
     tutor does not break loading of the others.
     """
 
@@ -81,33 +81,32 @@ class TutorRegistry:
         self.tutors_dir = Path(tutors_dir)
         self._tutors: dict[str, Tutor] = {}
         self._invalid: list[dict[str, Any]] = []
-        self._mtimes: dict[Path, float] = {}
+        self._stamps: dict[Path, tuple[int, int]] = {}
 
-    def _scan(self) -> dict[Path, float]:
-        mtimes: dict[Path, float] = {}
+    def _scan(self) -> dict[Path, tuple[int, int]]:
+        """Return {path: (mtime_ns, size)} for all tutor content files."""
+        stamps: dict[Path, tuple[int, int]] = {}
         if not self.tutors_dir.exists() or not self.tutors_dir.is_dir():
-            return mtimes
+            return stamps
         for subdir in sorted(self.tutors_dir.iterdir()):
             if not subdir.is_dir():
                 continue
-            tutor_yaml = subdir / "tutor.yaml"
-            if not tutor_yaml.exists():
-                continue
-            mtimes[tutor_yaml] = tutor_yaml.stat().st_mtime
-            problems_yaml = subdir / "problems.yaml"
-            if problems_yaml.exists():
-                mtimes[problems_yaml] = problems_yaml.stat().st_mtime
-        return mtimes
-
-    def _needs_reload(self) -> bool:
-        return self._scan() != self._mtimes
+            for name in ("tutor.yaml", "problems.yaml"):
+                path = subdir / name
+                if path.exists():
+                    st = path.stat()
+                    stamps[path] = (st.st_mtime_ns, st.st_size)
+        return stamps
 
     def load(self) -> tuple[dict[str, Tutor], list[dict[str, Any]]]:
-        """Load all valid tutors and return (tutors, invalid)."""
-        if not self._needs_reload():
-            return self._tutors.copy(), list(self._invalid)
+        """Load all valid tutors and return (tutors, invalid).
 
+        Performs a single directory scan per call; reloads the cached tutors
+        only when the scan differs from the cached stamps.
+        """
         current = self._scan()
+        if current == self._stamps:
+            return self._tutors.copy(), list(self._invalid)
         tutors: dict[str, Tutor] = {}
         invalid: list[dict[str, Any]] = []
 
@@ -159,7 +158,7 @@ class TutorRegistry:
 
         self._tutors = tutors
         self._invalid = invalid
-        self._mtimes = current
+        self._stamps = current
         return tutors.copy(), list(invalid)
 
     def _validate(
@@ -167,12 +166,40 @@ class TutorRegistry:
     ) -> list[tuple[str, str]]:
         errors: list[tuple[str, str]] = []
 
+        if not tutor.persona or not tutor.persona.strip():
+            errors.append(("persona", "persona must be non-empty"))
+
+        # At least one concept; all([]) is True, so an empty list needs an
+        # explicit check.
+        if not tutor.concepts:
+            errors.append(("concepts", "tutor must define at least one concept"))
+
         # Unique, non-empty concept slugs.
         slugs = [c.slug for c in tutor.concepts]
         if not all(slugs):
             errors.append(("concepts[].slug", "concept slugs must be non-empty"))
         if len(slugs) != len(set(slugs)):
             errors.append(("concepts[].slug", "concept slugs must be unique"))
+
+        # Reference entries must be non-empty and point at http(s) URLs.
+        # Reference.url is a plain string so this check can name the concept.
+        for concept in tutor.concepts:
+            for i, ref in enumerate(concept.references):
+                if not ref.title.strip():
+                    errors.append(
+                        (
+                            f"concepts[{concept.slug}].references[{i}].title",
+                            f"reference title must be non-empty (concept '{concept.slug}')",
+                        )
+                    )
+                url = ref.url.strip().lower()
+                if not url.startswith(("http://", "https://")):
+                    errors.append(
+                        (
+                            f"concepts[{concept.slug}].references[{i}].url",
+                            f"reference url must be an http(s) URL (concept '{concept.slug}')",
+                        )
+                    )
 
         # Problem references must resolve and ids must be unique.
         problem_ids = [p.id for p in tutor.problems]

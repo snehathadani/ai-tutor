@@ -171,6 +171,17 @@ async def list_tutors() -> dict[str, Any]:
                 "description": t.description,
                 "age_range": t.age_range,
                 "concept_count": len(t.concepts),
+                "concepts": [
+                    {
+                        "slug": c.slug,
+                        "label": c.label,
+                        "references": [
+                            {"title": r.title, "url": r.url} for r in c.references
+                        ],
+                    }
+                    for c in t.concepts
+                ],
+                "level_labels": t.level_labels,
             }
             for t in sorted(tutors.values(), key=lambda x: x.id)
         ],

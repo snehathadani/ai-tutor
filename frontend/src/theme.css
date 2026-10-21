@@ -103,6 +103,16 @@ input:focus {
   font-size: 0.9rem;
 }
 
+.badge {
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background-color: #2d3548;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .transcript {
   display: flex;
   flex-direction: column;

@@ -31,7 +31,7 @@ interface Summary {
 
 const TUTOR_WAKEUP_MS = 20000;
 
-function LinkCard({
+export function LinkCard({
   tutor,
   activeConcept,
   onClear,
@@ -299,8 +299,16 @@ export default function App() {
     setMuted(!enabled);
   }, [room, muted]);
 
+  const handleSelectTutor = useCallback((tutor: Tutor) => {
+    setSelectedTutor(tutor);
+    // A slug published by the previous tutor's session must not leak into
+    // the newly selected tutor's link card.
+    setActiveConcept(null);
+  }, []);
+
   const disconnect = useCallback(async () => {
     if (!room) return;
+    setActiveConcept(null);
     await room.disconnect();
   }, [room]);
 
@@ -343,7 +351,7 @@ export default function App() {
         tutors={tutors}
         invalid={invalidTutors}
         selected={selectedTutor}
-        onSelect={setSelectedTutor}
+        onSelect={handleSelectTutor}
       />
 
       <ConnectPanel

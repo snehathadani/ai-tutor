@@ -58,6 +58,34 @@ def test_list_tutors(client):
     assert "probability" in ids
 
 
+def test_list_tutors_includes_concepts_references_and_level_labels(client):
+    r = client.get("/api/tutors")
+    assert r.status_code == 200
+    data = r.json()
+    probability = next(t for t in data["tutors"] if t["id"] == "probability")
+
+    # concept_count stays consistent with the embedded concepts list.
+    assert probability["concept_count"] == len(probability["concepts"])
+
+    # A concept's references array is present so the frontend LinkCard can
+    # render without a second fetch.
+    sample_space = next(
+        c for c in probability["concepts"] if c["slug"] == "sample-space"
+    )
+    assert sample_space["label"] == "Sample space and outcomes"
+    assert sample_space["references"], "expected at least one reference"
+    for ref in sample_space["references"]:
+        assert set(ref) == {"title", "url"}
+        assert ref["url"].startswith(("http://", "https://"))
+
+    # level_labels comes through for the mastery panel.
+    assert probability["level_labels"] == {
+        "1": "Getting started",
+        "2": "Building confidence",
+        "3": "Ready to move on",
+    }
+
+
 def test_get_tutor(client):
     r = client.get("/api/tutors/probability")
     assert r.status_code == 200

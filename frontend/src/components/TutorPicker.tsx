@@ -6,7 +6,6 @@ interface Reference {
 interface Concept {
   slug: string;
   label: string;
-  intro?: string;
   references?: Reference[];
 }
 
@@ -47,7 +46,10 @@ export default function TutorPicker({ tutors, invalid, selected, onSelect }: Pro
             aria-pressed={selected?.id === tutor.id}
           >
             <h3>{tutor.title}</h3>
-            <span className="status">{tutor.subject}</span>
+            <div className="form-row">
+              <span className="status">{tutor.subject}</span>
+              {tutor.age_range && <span className="badge">Ages {tutor.age_range}</span>}
+            </div>
             <p style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>{tutor.description}</p>
             <span className="status">{tutor.concept_count} concepts</span>
           </button>

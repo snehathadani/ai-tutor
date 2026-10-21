@@ -21,34 +21,34 @@ concepts:
   - slug: chance-words
     label: Chance words and likelihood
     references:
-      - title: Probability basics - Khan Academy
+      - title: Probability unit - Khan Academy
         url: https://www.khanacademy.org/math/statistics-probability/probability-library
   - slug: sample-space
     label: Sample space and outcomes
     references:
-      - title: Sample spaces - Khan Academy
-        url: https://www.khanacademy.org/math/statistics-probability/probability-library/sample-spaces
+      - title: Probability unit - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library
   - slug: probability-fraction
     label: Probability as a fraction
     references:
-      - title: Basic probability - Khan Academy
-        url: https://www.khanacademy.org/math/statistics-probability/probability-library/basic-probability
+      - title: Basic theoretical probability - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library/basic-theoretical-probability
   - slug: fairness-comparing
     label: Fairness and comparing chances
   - slug: experiment-vs-theory
     label: Experiment vs theory
     references:
-      - title: Experimental vs theoretical probability - Khan Academy
-        url: https://www.khanacademy.org/math/statistics-probability/probability-library/experimental-versus-theoretical-probability-simulation
+      - title: Probability unit - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library
   - slug: complementary-events
     label: Complementary events
     references:
-      - title: Complementary events - Khan Academy
-        url: https://www.khanacademy.org/math/statistics-probability/probability-library/complementary-events
+      - title: Probability unit - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library
   - slug: two-coin-events
     label: Two-coin compound events
     references:
-      - title: Independent and dependent events - Khan Academy
-        url: https://www.khanacademy.org/math/statistics-probability/probability-library/independent-dependent-events
+      - title: Multiplication rule for dependent events - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library/multiplication-rule-dependent
   - slug: expected-value
     label: Expected value (stretch)

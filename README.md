@@ -53,12 +53,12 @@ tutors/
     └── problems.yaml   # optional problem bank
 ```
 
-- `tutor.yaml` — `id`, `title`, `subject`, `description`, optional `age_range`, required `persona` (system instructions), optional `level_labels`, and `concepts` with optional `references`.
+- `tutor.yaml` — `title`, `subject`, `description`, optional `age_range`, required `persona` (system instructions), optional `level_labels`, and `concepts` with optional `references`. There is no `id` field: the tutor id comes from the directory name (`tutors.py` overwrites any `id` key in the YAML with it).
 - `problems.yaml` — optional `problems` list; a missing file means the tutor can converse but has no problems to serve.
 - The directory name must equal the tutor `id`.
-- References are UI-only: the agent persona never contains URLs and the agent never speaks a URL.
+- References are UI-only: the agent persona never contains URLs and the agent never speaks a URL. The reference URLs shipped with the probability tutor are examples only — a tutor author should replace them with links they have verified.
 
-The registry validates tutors on load, excludes invalid ones with a logged error, and exposes them on `GET /api/tutors` in the `invalid` array. Set `TUTORS_DIR` to point at the content directory.
+The registry validates tutors on load, excludes invalid ones with a logged error, and exposes them on `GET /api/tutors` in the `invalid` array (the tutor picker shows a warning row for them). `GET /api/tutors` also returns each tutor's `concepts` — including each concept's `references` — and its `level_labels`, so the picker, link card, and mastery panel render without a second fetch; `GET /api/tutors/{id}` returns the full tutor. Set `TUTORS_DIR` to point at the content directory.
 
 ## LLM provider configuration
 
