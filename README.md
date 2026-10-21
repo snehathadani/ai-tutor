@@ -112,7 +112,9 @@ Today: one agent container and one API process handle one session per room in on
 
 ## How to run
 
-### Docker / podman compose (production-like)
+Two run paths; the compose file itself is standard `docker-compose.yml` syntax, so Docker users are unaffected by anything below.
+
+### Docker (grader path)
 
 ```bash
 cp .env.example .env
@@ -120,9 +122,22 @@ cp .env.example .env
 docker compose up --build
 ```
 
+### Podman (dev path on this machine)
+
+```bash
+./scripts/dev-up.sh
+```
+
+The script exists because `podman-compose` 1.0.6 does not recreate containers on a plain
+`up -d --build`: it errors on the already-taken container names, falls back to `podman start`, and
+keeps serving the stale image after a rebuild. It therefore runs `down --remove-orphans` first and
+then `up -d --build --force-recreate`, so the freshly built image is always what actually serves.
+
 The frontend is on http://localhost:3000, API on http://localhost:8000/api.
 
-> I verified the compose stack locally with `podman-compose` 1.0.6 because Docker was not installed on the build machine. The file is standard `docker-compose.yml`, so real Docker should produce the same result. Redis is **not** published to the host anymore; the api and agent reach it on the internal compose network. If you run native dev with a host Redis, bind it to a non-default port (e.g. `6380`) to avoid colliding with other services.
+Redis is **not** published to the host anymore; the api and agent reach it on the internal compose
+network. If you run native dev with a host Redis, bind it to a non-default port (e.g. `6380`) to
+avoid colliding with other services.
 
 ### Native dev
 

@@ -11,18 +11,12 @@ import {
 } from 'livekit-client';
 
 import ConnectPanel from './components/ConnectPanel';
+import { mergeTranscriptionTurns, type Turn } from './transcript';
 import MasteryPanel from './components/MasteryPanel';
 import SummaryView from './components/SummaryView';
 import TranscriptPanel from './components/TranscriptPanel';
 import TutorPicker, { type Tutor } from './components/TutorPicker';
 import VoicePanel from './components/VoicePanel';
-
-interface Turn {
-  id: string;
-  role: 'user' | 'assistant';
-  text: string;
-  ts: number;
-}
 
 interface Summary {
   summary: string;
@@ -252,12 +246,19 @@ export default function App() {
         newRoom.on(
           RoomEvent.TranscriptionReceived,
           (segments: TranscriptionSegment[], participant?: Participant) => {
-            for (const seg of segments) {
-              const text = seg.text?.trim();
-              if (!text) continue;
-              const role = participant?.identity === identity ? 'user' : 'assistant';
-              addTurn(role, text);
-            }
+            // LiveKit re-delivers the same segment id as the STT result evolves;
+            // merge by participant+segment id so updates replace in place
+            // instead of appending a new bubble per delivery.
+            const participantId = participant?.identity ?? 'unknown';
+            const role = participant?.identity === identity ? 'user' : 'assistant';
+            setTurns((prev) =>
+              mergeTranscriptionTurns(
+                prev,
+                segments.map((seg) => ({ id: seg.id, text: seg.text, final: seg.final })),
+                role,
+                participantId
+              )
+            );
           }
         );
 

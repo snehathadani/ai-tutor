@@ -1,9 +1,4 @@
-interface Turn {
-  id: string;
-  role: 'user' | 'assistant';
-  text: string;
-  ts: number;
-}
+import type { Turn } from '../transcript';
 
 interface Props {
   turns: Turn[];
@@ -18,7 +13,11 @@ export default function TranscriptPanel({ turns }: Props) {
           <div className="status">No messages yet. Connect to start talking.</div>
         )}
         {turns.map((turn) => (
-          <div key={turn.id} className={`turn ${turn.role}`}>
+          <div
+            key={turn.id}
+            className={`turn ${turn.role}`}
+            style={{ opacity: turn.pending ? 0.6 : undefined }}
+          >
             <strong>{turn.role === 'user' ? 'You' : 'Tutor'}</strong>
             <p style={{ margin: '0.25rem 0 0 0' }}>{turn.text}</p>
           </div>
