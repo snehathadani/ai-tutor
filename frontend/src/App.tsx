@@ -682,11 +682,9 @@ export default function App() {
 
       <audio ref={audioElRef} autoPlay playsInline style={{ display: 'none' }} />
 
-      <div className="form-row" style={{ alignItems: 'stretch' }}>
-        <div style={{ flex: 2 }}>
-          <TranscriptPanel turns={turns} />
-        </div>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--gap)' }}>
+      <div className="workspace">
+        <TranscriptPanel turns={turns} />
+        <aside className="rail">
           <LinkCard tutor={selectedTutor} activeConcept={activeConcept} onClear={() => setActiveConcept(null)} />
           <MasteryPanel
             tutor={selectedTutor}
@@ -694,7 +692,7 @@ export default function App() {
             activeConcept={activeConcept}
             refreshKey={masteryRefreshKey}
           />
-        </div>
+        </aside>
       </div>
 
       {summary && <SummaryView summary={summary} onClose={() => setSummary(null)} />}

@@ -166,8 +166,64 @@ input:focus {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: 320px;
+  /* The transcript is the primary reading surface: it fills the panel and
+     scrolls internally instead of being capped at a few hundred pixels. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+/* Two-column workspace: conversation on the left, reference and progress on
+   the right. The rail scrolls on its own so a long concept list never pushes
+   the transcript short. */
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
+  gap: var(--gap);
+  align-items: start;
+}
+
+.transcript-card {
+  display: flex;
+  flex-direction: column;
+  height: clamp(420px, calc(100vh - 260px), 720px);
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  max-height: clamp(420px, calc(100vh - 260px), 720px);
+  overflow-y: auto;
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.panel-meta {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 900px) {
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .transcript-card {
+    height: 55vh;
+    min-height: 320px;
+  }
+
+  .rail {
+    max-height: none;
+    overflow: visible;
+  }
 }
 
 .turn {

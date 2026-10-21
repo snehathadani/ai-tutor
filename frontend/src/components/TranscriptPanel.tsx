@@ -47,8 +47,11 @@ export default function TranscriptPanel({ turns }: Props) {
   }, []);
 
   return (
-    <div className="card">
-      <h2>Transcript</h2>
+    <div className="card transcript-card">
+      <div className="panel-head">
+        <h2>Transcript</h2>
+        <span className="panel-meta">{turns.length} turns</span>
+      </div>
       <div
         className="transcript"
         style={{ marginTop: '0.75rem' }}
