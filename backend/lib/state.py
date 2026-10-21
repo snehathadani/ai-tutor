@@ -15,28 +15,28 @@ logger = logging.getLogger(__name__)
 NAMESPACE = "tutor"
 
 
-def _mastery_key() -> str:
-    return f"{NAMESPACE}:user:mastery"
+def _mastery_key(tutor_id: str) -> str:
+    return f"{NAMESPACE}:{tutor_id}:mastery"
 
 
-def _session_transcript_key(sid: str) -> str:
-    return f"{NAMESPACE}:session:{sid}:transcript"
+def _sessions_zset_key(tutor_id: str) -> str:
+    return f"{NAMESPACE}:{tutor_id}:sessions"
 
 
-def _session_meta_key(sid: str) -> str:
-    return f"{NAMESPACE}:session:{sid}:meta"
+def _session_transcript_key(tutor_id: str, sid: str) -> str:
+    return f"{NAMESPACE}:{tutor_id}:session:{sid}:transcript"
 
 
-def _session_summary_key(sid: str) -> str:
-    return f"{NAMESPACE}:session:{sid}:summary"
+def _session_meta_key(tutor_id: str, sid: str) -> str:
+    return f"{NAMESPACE}:{tutor_id}:session:{sid}:meta"
 
 
-def _session_chat_key(sid: str) -> str:
-    return f"{NAMESPACE}:session:{sid}:chat_ctx"
+def _session_summary_key(tutor_id: str, sid: str) -> str:
+    return f"{NAMESPACE}:{tutor_id}:session:{sid}:summary"
 
 
-def _sessions_zset_key() -> str:
-    return f"{NAMESPACE}:user:sessions"
+def _session_chat_key(tutor_id: str, sid: str) -> str:
+    return f"{NAMESPACE}:{tutor_id}:session:{sid}:chat_ctx"
 
 
 class StateError(Exception):
@@ -120,9 +120,9 @@ class StateService:
             logger.error("Redis error during %s: %s", operation, exc)
             raise StateError(f"Redis unavailable ({operation}): {exc}") from exc
 
-    async def get_mastery(self) -> dict[str, dict[str, Any]]:
+    async def get_mastery(self, tutor_id: str) -> dict[str, dict[str, Any]]:
         r = self._ensure()
-        data = await self._safe(r.hgetall(_mastery_key()), "get_mastery")
+        data = await self._safe(r.hgetall(_mastery_key(tutor_id)), "get_mastery")
         result: dict[str, dict[str, Any]] = {}
         for slug, raw in data.items():
             record = json.loads(raw)
@@ -130,9 +130,11 @@ class StateService:
             result[slug] = record
         return result
 
-    async def update_mastery(self, slug: str, correct: bool, weight: float = 1.0) -> None:
+    async def update_mastery(
+        self, tutor_id: str, slug: str, correct: bool, weight: float = 1.0
+    ) -> None:
         r = self._ensure()
-        key = _mastery_key()
+        key = _mastery_key(tutor_id)
         raw = await self._safe(r.hget(key, slug), "update_mastery")
         record = json.loads(raw) if raw else _default_concept()
         record["total"] = record.get("total", 0) + 1
@@ -147,14 +149,14 @@ class StateService:
         record["level"] = _compute_level(record)
         await self._safe(r.hset(key, slug, json.dumps(record)), "update_mastery")
 
-    async def record_observation(self, slug: str, signal: str) -> None:
+    async def record_observation(self, tutor_id: str, slug: str, signal: str) -> None:
         if signal not in ("got_it", "struggling"):
             return
         correct = signal == "got_it"
-        await self.update_mastery(slug, correct=correct, weight=0.5)
+        await self.update_mastery(tutor_id, slug, correct=correct, weight=0.5)
 
     async def add_transcript_turn(
-        self, sid: str, role: str, text: str, concept: str | None = None
+        self, tutor_id: str, sid: str, role: str, text: str, concept: str | None = None
     ) -> None:
         r = self._ensure()
         turn = {
@@ -163,62 +165,70 @@ class StateService:
             "ts": time.time(),
             "concept": concept,
         }
-        key = _session_transcript_key(sid)
+        key = _session_transcript_key(tutor_id, sid)
         await self._safe(r.rpush(key, json.dumps(turn)), "add_transcript_turn")
         await self._safe(r.expire(key, 7 * 24 * 60 * 60), "expire_transcript")
 
-    async def get_transcript(self, sid: str) -> list[dict[str, Any]]:
+    async def get_transcript(self, tutor_id: str, sid: str) -> list[dict[str, Any]]:
         r = self._ensure()
-        raw = await self._safe(r.lrange(_session_transcript_key(sid), 0, -1), "get_transcript")
+        raw = await self._safe(
+            r.lrange(_session_transcript_key(tutor_id, sid), 0, -1), "get_transcript"
+        )
         return [json.loads(item) for item in raw]
 
-    async def set_session_meta(self, sid: str, **fields: Any) -> None:
+    async def set_session_meta(
+        self, tutor_id: str, sid: str, **fields: Any
+    ) -> None:
         r = self._ensure()
-        key = _session_meta_key(sid)
+        key = _session_meta_key(tutor_id, sid)
         await self._safe(r.hset(key, mapping=fields), "set_session_meta")
         await self._safe(r.expire(key, 7 * 24 * 60 * 60), "expire_meta")
 
-    async def get_session_meta(self, sid: str) -> dict[str, Any]:
+    async def get_session_meta(self, tutor_id: str, sid: str) -> dict[str, Any]:
         r = self._ensure()
-        data = await self._safe(r.hgetall(_session_meta_key(sid)), "get_session_meta")
+        data = await self._safe(r.hgetall(_session_meta_key(tutor_id, sid)), "get_session_meta")
         return dict(data)
 
-    async def start_session(self, sid: str) -> None:
+    async def start_session(self, tutor_id: str, sid: str) -> None:
         now = time.time()
-        await self.set_session_meta(sid, started_ts=now, status="active", concept_count=0)
+        await self.set_session_meta(tutor_id, sid, started_ts=now, status="active", concept_count=0)
         await self._safe(
-            self._ensure().zadd(_sessions_zset_key(), {sid: now}),
+            self._ensure().zadd(_sessions_zset_key(tutor_id), {sid: now}),
             "start_session",
         )
 
-    async def end_session(self, sid: str, summary: dict[str, Any] | None = None) -> None:
+    async def end_session(
+        self, tutor_id: str, sid: str, summary: dict[str, Any] | None = None
+    ) -> None:
         r = self._ensure()
         now = time.time()
-        await self.set_session_meta(sid, ended_ts=now, status="ended")
+        await self.set_session_meta(tutor_id, sid, ended_ts=now, status="ended")
         if summary is not None:
-            await self.set_summary(sid, summary)
+            await self.set_summary(tutor_id, sid, summary)
 
-    async def set_summary(self, sid: str, summary: dict[str, Any]) -> None:
+    async def set_summary(
+        self, tutor_id: str, sid: str, summary: dict[str, Any]
+    ) -> None:
         r = self._ensure()
-        key = _session_summary_key(sid)
+        key = _session_summary_key(tutor_id, sid)
         await self._safe(r.set(key, json.dumps(summary)), "set_summary")
         await self._safe(r.expire(key, 30 * 24 * 60 * 60), "expire_summary")
 
-    async def get_summary(self, sid: str) -> dict[str, Any] | None:
+    async def get_summary(self, tutor_id: str, sid: str) -> dict[str, Any] | None:
         r = self._ensure()
-        raw = await self._safe(r.get(_session_summary_key(sid)), "get_summary")
+        raw = await self._safe(r.get(_session_summary_key(tutor_id, sid)), "get_summary")
         return json.loads(raw) if raw else None
 
-    async def list_sessions(self) -> list[dict[str, Any]]:
+    async def list_sessions(self, tutor_id: str) -> list[dict[str, Any]]:
         r = self._ensure()
         sids = await self._safe(
-            r.zrevrange(_sessions_zset_key(), 0, -1),
+            r.zrevrange(_sessions_zset_key(tutor_id), 0, -1),
             "list_sessions",
         )
         result = []
         for sid in sids:
-            meta = await self.get_session_meta(sid)
-            summary = await self.get_summary(sid)
+            meta = await self.get_session_meta(tutor_id, sid)
+            summary = await self.get_summary(tutor_id, sid)
             result.append(
                 {
                     "sid": sid,
@@ -230,20 +240,22 @@ class StateService:
             )
         return result
 
-    async def save_chat_context(self, sid: str, chat_ctx: ChatContext) -> None:
+    async def save_chat_context(
+        self, tutor_id: str, sid: str, chat_ctx: ChatContext
+    ) -> None:
         r = self._ensure()
-        key = _session_chat_key(sid)
+        key = _session_chat_key(tutor_id, sid)
         payload = json.dumps(chat_ctx.to_dict())
         await self._safe(r.set(key, payload), "save_chat_context")
         await self._safe(r.expire(key, 7 * 24 * 60 * 60), "expire_chat_ctx")
 
-    async def load_chat_context(self, sid: str) -> ChatContext:
+    async def load_chat_context(self, tutor_id: str, sid: str) -> ChatContext:
         r = self._ensure()
-        raw = await self._safe(r.get(_session_chat_key(sid)), "load_chat_context")
+        raw = await self._safe(r.get(_session_chat_key(tutor_id, sid)), "load_chat_context")
         if not raw:
             return ChatContext.empty()
         try:
             return ChatContext.from_dict(json.loads(raw))
         except Exception as exc:
-            logger.error("Failed to load chat context for %s: %s", sid, exc)
+            logger.error("Failed to load chat context for %s/%s: %s", tutor_id, sid, exc)
             return ChatContext.empty()

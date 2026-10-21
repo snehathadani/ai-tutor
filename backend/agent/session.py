@@ -11,6 +11,7 @@ from agent.conversation import build_agent
 from agent.summary import generate_session_summary
 from lib.config import Settings
 from lib.state import StateError, StateService
+from lib.tutors import Tutor
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ def _filter_prior_messages(chat_ctx: ChatContext) -> list[Any]:
     return kept
 
 
-async def run_session(ctx: lka.JobContext, settings: Settings) -> None:
+async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> None:
     session_id = ctx.room.name
     state = StateService(settings.redis_url)
     connected = False
@@ -41,19 +42,21 @@ async def run_session(ctx: lka.JobContext, settings: Settings) -> None:
         mastery: dict[str, dict[str, Any]] = {}
         if connected:
             try:
-                prior = await state.load_chat_context(session_id)
+                prior = await state.load_chat_context(tutor.id, session_id)
             except Exception as exc:
                 logger.error("Failed to load chat context: %s", exc)
             try:
-                mastery = await state.get_mastery()
+                mastery = await state.get_mastery(tutor.id)
             except Exception as exc:
                 logger.error("Failed to load mastery: %s", exc)
 
         history = _filter_prior_messages(prior)
         chat_ctx = ChatContext(items=history)
 
-        session_ctx = SessionContext(session_id=session_id, state=state)
-        agent = build_agent(settings, session_ctx, chat_ctx, mastery=mastery)
+        session_ctx = SessionContext(
+            session_id=session_id, state=state, tutor=tutor, room=ctx.room
+        )
+        agent = build_agent(settings, tutor, session_ctx, chat_ctx, mastery=mastery)
         session = lka.AgentSession(userdata=session_ctx)
 
         async def _on_item(event: lka.ConversationItemAddedEvent) -> None:
@@ -66,12 +69,13 @@ async def run_session(ctx: lka.JobContext, settings: Settings) -> None:
                 if connected:
                     try:
                         await state.add_transcript_turn(
+                            tutor.id,
                             session_id,
                             role=item.role,
                             text=text,
                             concept=session_ctx.current_concept,
                         )
-                        await state.save_chat_context(session_id, session.history)
+                        await state.save_chat_context(tutor.id, session_id, session.history)
                     except Exception as exc:
                         logger.error("Failed to persist turn: %s", exc)
 
@@ -81,11 +85,11 @@ async def run_session(ctx: lka.JobContext, settings: Settings) -> None:
 
         if connected:
             try:
-                await state.start_session(session_id)
+                await state.start_session(tutor.id, session_id)
             except Exception as exc:
                 logger.error("Failed to record session start: %s", exc)
 
-        logger.info("Starting voice session %s", session_id)
+        logger.info("Starting voice session %s for tutor %s", session_id, tutor.id)
         await session.start(agent=agent, room=ctx.room)
     finally:
         try:
@@ -94,7 +98,7 @@ async def run_session(ctx: lka.JobContext, settings: Settings) -> None:
             logger.warning("Error closing Redis in run_session: %s", exc)
 
 
-async def finalize_session(ctx: lka.JobContext, settings: Settings) -> None:
+async def finalize_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor | None) -> None:
     session_id = ctx.room.name
     state = StateService(settings.redis_url)
     try:
@@ -105,10 +109,11 @@ async def finalize_session(ctx: lka.JobContext, settings: Settings) -> None:
             return
 
         try:
-            transcript = await state.get_transcript(session_id)
-            mastery = await state.get_mastery()
-            summary = await generate_session_summary(settings, transcript, mastery)
-            await state.end_session(session_id, summary=summary)
+            tutor_id = tutor.id if tutor else session_id.split("-")[0]
+            transcript = await state.get_transcript(tutor_id, session_id)
+            mastery = await state.get_mastery(tutor_id)
+            summary = await generate_session_summary(settings, transcript, mastery, tutor)
+            await state.end_session(tutor_id, session_id, summary=summary)
             logger.info("Session %s finalized with summary", session_id)
         except Exception as exc:
             logger.error("Failed to finalize session %s: %s", session_id, exc)

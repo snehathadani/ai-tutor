@@ -1,0 +1,54 @@
+id: probability
+title: Probability Voice Tutor
+subject: Mathematics
+description: A Socratic, kid-friendly tutor for chance and probability.
+age_range: "12"
+persona: |
+  You are a warm, patient voice tutor helping a 12-year-old learn probability. Keep every reply to 2-3 short sentences, kid-friendly, and spoken aloud.
+
+  Rules:
+  1. Stay in probability. If the student asks something else, gently redirect back to probability.
+  2. Be Socratic: ask a leading question or give a hint, but NEVER say the final answer when the student is supposed to figure it out.
+  3. Use the get_problem tool to pick practice problems and grade_answer to check answers.
+  4. Use get_mastery to adapt: if a concept is level 0, give more scaffolding; if level 2-3, move forward.
+  5. If the student seems unsafe or off-topic, redirect kindly and, if needed, end the turn.
+  6. Keep responses short because this is real-time voice.
+level_labels:
+  1: Getting started
+  2: Building confidence
+  3: Ready to move on
+concepts:
+  - slug: chance-words
+    label: Chance words and likelihood
+    references:
+      - title: Probability basics - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library
+  - slug: sample-space
+    label: Sample space and outcomes
+    references:
+      - title: Sample spaces - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library/sample-spaces
+  - slug: probability-fraction
+    label: Probability as a fraction
+    references:
+      - title: Basic probability - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library/basic-probability
+  - slug: fairness-comparing
+    label: Fairness and comparing chances
+  - slug: experiment-vs-theory
+    label: Experiment vs theory
+    references:
+      - title: Experimental vs theoretical probability - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library/experimental-versus-theoretical-probability-simulation
+  - slug: complementary-events
+    label: Complementary events
+    references:
+      - title: Complementary events - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library/complementary-events
+  - slug: two-coin-events
+    label: Two-coin compound events
+    references:
+      - title: Independent and dependent events - Khan Academy
+        url: https://www.khanacademy.org/math/statistics-probability/probability-library/independent-dependent-events
+  - slug: expected-value
+    label: Expected value (stretch)

@@ -1,7 +1,9 @@
-# Probability Voice Tutor
+# AI Tutor
 
-A real-time voice AI tutor for 12-year-olds learning probability, built with LiveKit,
-FastAPI, Redis, and React.
+A real-time multi-tutor voice AI built with LiveKit, FastAPI, Redis, and React.
+Each tutor is defined by `tutors/<id>/tutor.yaml` and an optional
+`tutors/<id>/problems.yaml`. The worker is dispatched with explicit tutor
+metadata so session ids and mastery are namespaced per tutor.
 
 **Verified environment:** backend requirements resolve and install on Python 3.11 (native
 conda dev) and Python 3.12 (`python:3.12-slim` Docker base). The compose stack was validated
@@ -14,29 +16,49 @@ with `podman-compose` 1.0.6 because Docker is not installed on the build machine
 ┌─────────────┐      WebSocket      ┌──────────────────────┐
 │   Browser   │◄───────────────────►│  LiveKit Cloud       │
 │  (React)    │                     │  (rooms + inference) │
-└──────┬──────┘                     └──────────┬───────────┘
-       │                                        │
-       │ HTTP  /api/token, /api/mastery         │ dispatches jobs
-       ▼                                        ▼
+└────┬────────┘                     └──────────┬───────────┘
+     │                                         │
+     │ HTTP  /api/token, /api/mastery          │ dispatches jobs
+     │                                         │  {tutor_id: ...}
+     ▼                                         ▼
 ┌─────────────┐                         ┌──────────────┐
 │  FastAPI    │                         │ livekit-agent│
 │  (read-only)│                         │ worker       │
-└──────┬──────┘                         └──────┬───────┘
-       │                                        │
-       │ reads                                    │ writes
-       ▼                                        ▼
+└────┬────────┘                         └──────┬───────┘
+     │                                          │
+     │ reads                                    │ writes
+     ▼                                          ▼
 ┌─────────────────────────────────────────────────────┐
 │                     Redis 7                          │
-│  mastery, transcript, meta, summary, chat context   │
+│  tutor:{id}:mastery, tutor:{id}:sessions,           │
+│  tutor:{id}:session:{sid}:...                       │
 └─────────────────────────────────────────────────────┘
 ```
 
 - **frontend** — Vite + React + TypeScript, dark-only UI. Talks to LiveKit for media and to the API for tokens/history. Nginx proxies `/api` in Docker; Vite dev server proxies it locally.
-- **api** — FastAPI/uvicorn. Stateless. Mints LiveKit JWTs and serves read-only mastery/session views.
+- **api** — FastAPI/uvicorn. Stateless. Mints LiveKit JWTs and serves read-only tutor/mastery/session views.
 - **agent** — `livekit-agents` worker that joins a room, runs VAD→STT→LLM→TTS, persists transcript/mastery/summary to Redis.
 - **redis** — Sole conversation state store; AOF enabled in compose.
 
 Key invariant: only the agent writes Redis conversation state. The API is read-only.
+
+## Tutor content
+
+Tutors live under `tutors/<id>/`:
+
+```
+tutors/
+└── probability/
+    ├── tutor.yaml      # metadata, persona, concepts, references
+    └── problems.yaml   # optional problem bank
+```
+
+- `tutor.yaml` — `id`, `title`, `subject`, `description`, optional `age_range`, required `persona` (system instructions), optional `level_labels`, and `concepts` with optional `references`.
+- `problems.yaml` — optional `problems` list; a missing file means the tutor can converse but has no problems to serve.
+- The directory name must equal the tutor `id`.
+- References are UI-only: the agent persona never contains URLs and the agent never speaks a URL.
+
+The registry validates tutors on load, excludes invalid ones with a logged error, and exposes them on `GET /api/tutors` in the `invalid` array. Set `TUTORS_DIR` to point at the content directory.
 
 ## LLM provider configuration
 
@@ -112,10 +134,11 @@ cd backend
 source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
 cp ../.env.example ../.env  # fill it in
-python -m uvicorn api.main:app --reload --port 8000
+# Point TUTORS_DIR at the repo-root tutors directory when running from backend/.
+TUTORS_DIR=../tutors python -m uvicorn api.main:app --reload --port 8000
 ```
 
-If your local Redis is on a different host port, set e.g. `REDIS_URL=redis://127.0.0.1:6380/0`.
+If your local Redis is on a different host port, set e.g. `REDIS_URL=redis://127.0.0.1:6380/0`. The default `TUTORS_DIR=./tutors` in `.env.example` works when running from the repo root; from `backend/` use `TUTORS_DIR=../tutors`.
 
 Agent (in another shell):
 
@@ -143,9 +166,29 @@ PYTHONPATH=. python -m pytest tests -v
 
 ## Agent dispatch
 
-The worker registers with the explicit `agent_name` `probability-tutor` (`backend/agent/worker.py`). Every time `/api/token` mints a LiveKit JWT, the API also requests an explicit agent dispatch for that room via LiveKit's `agent_dispatch.create_dispatch` (`backend/api/main.py`). Verified against `livekit-agents` 1.8.8.
+The worker registers with the explicit `agent_name` `tutor` (`backend/agent/worker.py`).
+Every time `/api/token` mints a LiveKit JWT, the API also requests an explicit agent
+dispatch for that room via LiveKit's `agent_dispatch.create_dispatch`
+(`backend/api/main.py`). The dispatch metadata is JSON `{"tutor_id": ...}`; the worker
+reads `ctx.job.metadata` to resolve the tutor at job start. Verified against
+`livekit-agents` 1.8.8.
 
 This means the worker does **not** need to be running before the participant joins. If the worker is down when a token is minted, the dispatch is still created; the frontend joins the room, waits up to ~20 seconds for an agent participant, and then shows a "Retry" button so the user can request another dispatch once the worker is available.
+
+## Redis key reset
+
+Mastery and sessions are now namespaced per tutor:
+
+- `tutor:{tutor_id}:mastery`
+- `tutor:{tutor_id}:sessions`
+- `tutor:{tutor_id}:session:{sid}:transcript`
+- `tutor:{tutor_id}:session:{sid}:meta`
+- `tutor:{tutor_id}:session:{sid}:summary`
+- `tutor:{tutor_id}:session:{sid}:chat_ctx`
+
+The old global `tutor:user:mastery` / `tutor:user:sessions` / `tutor:session:{sid}:...`
+keys from earlier versions are no longer read or written. There is no migration shim;
+deployments using the old keys will start with empty per-tutor state.
 
 ## What is untested
 

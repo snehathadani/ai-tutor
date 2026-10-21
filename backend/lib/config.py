@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 VALID_LLM_PROVIDERS = ("openai", "anthropic")
-AGENT_NAME = "probability-tutor"
+AGENT_NAME = "tutor"
 
 
 class Settings(BaseSettings):
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     llm_model: str = ""
 
     redis_url: str = "redis://redis:6379/0"
+    tutors_dir: str = "./tutors"
 
     stt_model: str = "deepgram/nova-3"
     tts_model: str = "cartesia/sonic-3.5"

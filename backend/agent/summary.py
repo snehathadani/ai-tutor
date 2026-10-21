@@ -8,12 +8,14 @@ from livekit.agents.llm import ChatContext
 
 from agent.llm import build_llm
 from lib.config import Settings
+from lib.tutors import Tutor
 
 
 async def generate_session_summary(
     settings: Settings,
     transcript: list[dict[str, Any]],
     mastery: dict[str, dict[str, Any]],
+    tutor: Tutor | None,
 ) -> dict[str, Any] | None:
     if not transcript:
         return None
@@ -25,11 +27,14 @@ async def generate_session_summary(
     )
     mastery_text = json.dumps(mastery, indent=2)
 
+    domain = tutor.subject if tutor else "the subject"
+
     chat_ctx = ChatContext()
     chat_ctx.add_message(
         role="system",
         content=(
-            "You are a tutor summary assistant. Produce a short JSON object with keys: "
+            f"You are a tutor summary assistant for {domain}. "
+            "Produce a short JSON object with keys: "
             "summary (one paragraph), strengths (list), next_steps (list). "
             "Be encouraging and specific. No raw scores, just concepts."
         ),
@@ -64,8 +69,8 @@ async def generate_session_summary(
         }
     except Exception:
         return {
-            "summary": "We had a great probability practice session! Keep exploring chance, fractions, and sample spaces.",
+            "summary": f"We had a great {domain} practice session! Keep exploring the concepts we covered.",
             "strengths": ["Participated actively"],
-            "next_steps": ["Try another probability problem next time."],
+            "next_steps": ["Try another problem next time."],
             "generated_ts": time.time(),
         }

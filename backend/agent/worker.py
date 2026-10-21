@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 
@@ -9,6 +10,7 @@ import livekit.api as lkapi
 
 from agent.session import finalize_session, run_session
 from lib.config import AGENT_NAME, VALID_LLM_PROVIDERS, Settings, get_settings
+from lib.tutors import TutorNotFound, TutorRegistry
 
 
 def _preflight(settings: Settings) -> None:
@@ -68,17 +70,43 @@ async def _check_livekit(settings: Settings) -> None:
         )
 
 
+def _tutor_from_metadata(ctx: lka.JobContext, registry: TutorRegistry):
+    metadata = {}
+    if ctx.job.metadata:
+        try:
+            metadata = json.loads(ctx.job.metadata)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Could not parse dispatch metadata: {exc}") from exc
+    tutor_id = metadata.get("tutor_id")
+    if not tutor_id:
+        raise RuntimeError("No tutor_id in dispatch metadata")
+    try:
+        return registry.get(tutor_id)
+    except TutorNotFound as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
 # Module-level entrypoints are required so livekit-agents can pickle them for
 # the per-job child processes. Settings are read from environment inside each
 # process via get_settings().
 
 
 async def entrypoint(ctx: lka.JobContext) -> None:
-    await run_session(ctx, get_settings())
+    settings = get_settings()
+    registry = TutorRegistry(settings.tutors_dir)
+    tutor = _tutor_from_metadata(ctx, registry)
+    await run_session(ctx, settings, tutor)
 
 
 async def on_session_end(ctx: lka.JobContext) -> None:
-    await finalize_session(ctx, get_settings())
+    settings = get_settings()
+    registry = TutorRegistry(settings.tutors_dir)
+    tutor: Tutor | None = None
+    try:
+        tutor = _tutor_from_metadata(ctx, registry)
+    except Exception as exc:
+        logging.warning("Could not resolve tutor for session end: %s", exc)
+    await finalize_session(ctx, settings, tutor)
 
 
 def main() -> None:
@@ -88,6 +116,17 @@ def main() -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
     _preflight(settings)
+
+    # Ensure at least one tutor loads before accepting jobs.
+    registry = TutorRegistry(settings.tutors_dir)
+    registry.load()
+    if not registry.list():
+        print(
+            "ERROR: No valid tutors found in TUTORS_DIR. "
+            f"Check that {settings.tutors_dir} contains tutor.yaml files.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     server = lka.AgentServer(max_retry=3)
     # Register this worker under an explicit agent name. The API will request

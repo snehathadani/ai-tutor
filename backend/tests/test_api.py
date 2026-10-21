@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
 from fakeredis.aioredis import FakeRedis
@@ -6,6 +8,10 @@ from fastapi.testclient import TestClient
 from api import main as api_main
 from lib.config import Settings, set_settings
 from lib.state import StateService
+
+
+def _repo_tutors_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "tutors"
 
 
 @pytest_asyncio.fixture
@@ -26,9 +32,11 @@ def client(state):
         llm_api_key="test-llm",
         llm_model="test-model",
         redis_url="redis://unused",
+        tutors_dir=str(_repo_tutors_dir()),
     )
     set_settings(settings)
     api_main.state_service = state
+    api_main.tutor_registry = None
 
     with TestClient(api_main.app) as c:
         yield c
@@ -40,8 +48,37 @@ def test_health(client):
     assert r.json()["ok"] is True
 
 
+def test_list_tutors(client):
+    r = client.get("/api/tutors")
+    assert r.status_code == 200
+    data = r.json()
+    assert "tutors" in data
+    assert "invalid" in data
+    ids = [t["id"] for t in data["tutors"]]
+    assert "probability" in ids
+
+
+def test_get_tutor(client):
+    r = client.get("/api/tutors/probability")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["id"] == "probability"
+    assert len(data["concepts"]) == 8
+
+
+def test_get_tutor_not_found(client):
+    r = client.get("/api/tutors/unknown")
+    assert r.status_code == 404
+    data = r.json()
+    assert data["detail"]["tutor_id"] == "unknown"
+    assert "probability" in data["detail"]["available"]
+
+
 def test_token(client):
-    r = client.post("/api/token", json={"room": "test-room", "identity": "student"})
+    r = client.post(
+        "/api/token",
+        json={"room": "probability-test-room", "identity": "student", "tutor_id": "probability"},
+    )
     assert r.status_code == 200
     data = r.json()
     assert "token" in data
@@ -51,8 +88,30 @@ def test_token(client):
     assert len(parts) == 3
 
 
+def test_token_requires_tutor_room_prefix(client):
+    r = client.post(
+        "/api/token",
+        json={"room": "math-room", "identity": "student", "tutor_id": "probability"},
+    )
+    assert r.status_code == 400
+
+
+def test_token_unknown_tutor(client):
+    r = client.post(
+        "/api/token",
+        json={"room": "unknown-room", "identity": "student", "tutor_id": "unknown"},
+    )
+    assert r.status_code == 404
+    data = r.json()
+    assert data["detail"]["tutor_id"] == "unknown"
+    assert "probability" in data["detail"]["available"]
+
+
 def test_dispatch_reports_failure_for_fake_credentials(client):
-    r = client.post("/api/dispatch", json={"room": "test-room"})
+    r = client.post(
+        "/api/dispatch",
+        json={"room": "probability-test-room", "tutor_id": "probability"},
+    )
     assert r.status_code == 200
     data = r.json()
     assert data["dispatched"] is False
@@ -60,10 +119,15 @@ def test_dispatch_reports_failure_for_fake_credentials(client):
 
 
 def test_mastery_and_sessions(client):
-    r = client.get("/api/mastery")
+    r = client.get("/api/mastery?tutor=probability")
     assert r.status_code == 200
     assert "concepts" in r.json()
 
-    r = client.get("/api/sessions")
+    r = client.get("/api/sessions?tutor=probability")
     assert r.status_code == 200
     assert r.json() == []
+
+
+def test_mastery_requires_tutor(client):
+    r = client.get("/api/mastery")
+    assert r.status_code == 422

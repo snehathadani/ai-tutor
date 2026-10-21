@@ -1,18 +1,20 @@
 import { useState } from 'react';
 
 interface Props {
-  onConnect: (room: string, identity: string) => void;
+  tutorId: string | null;
+  onConnect: (room: string, identity: string, tutorId: string) => void;
   disabled?: boolean;
 }
 
-export default function ConnectPanel({ onConnect, disabled }: Props) {
-  const [room, setRoom] = useState('probability-room');
+export default function ConnectPanel({ tutorId, onConnect, disabled }: Props) {
+  const [room, setRoom] = useState('room');
   const [identity, setIdentity] = useState('student');
+  const isDisabled = disabled || !tutorId;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (room.trim() && identity.trim()) {
-      onConnect(room.trim(), identity.trim());
+    if (room.trim() && identity.trim() && tutorId) {
+      onConnect(room.trim(), identity.trim(), tutorId);
     }
   };
 
@@ -24,20 +26,25 @@ export default function ConnectPanel({ onConnect, disabled }: Props) {
           value={room}
           onChange={(e) => setRoom(e.target.value)}
           placeholder="Room name"
-          disabled={disabled}
+          disabled={isDisabled}
           aria-label="Room name"
         />
         <input
           value={identity}
           onChange={(e) => setIdentity(e.target.value)}
           placeholder="Your name"
-          disabled={disabled}
+          disabled={isDisabled}
           aria-label="Your name"
         />
-        <button type="submit" disabled={disabled}>
+        <button type="submit" disabled={isDisabled}>
           Connect
         </button>
       </div>
+      {!tutorId && (
+        <div className="status" style={{ marginTop: '0.5rem' }}>
+          Select a tutor above to connect.
+        </div>
+      )}
     </form>
   );
 }

@@ -170,3 +170,54 @@ input:focus {
   color: var(--danger);
   font-size: 0.9rem;
 }
+
+.warning {
+  color: #f59e0b;
+  font-size: 0.9rem;
+}
+
+.tutor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+
+.tutor-card {
+  background-color: var(--panel-2);
+  border: 2px solid transparent;
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  text-align: left;
+  color: var(--text);
+}
+
+.tutor-card:hover {
+  border-color: var(--accent);
+}
+
+.tutor-card.selected {
+  border-color: var(--accent-2);
+}
+
+.tutor-card h3 {
+  font-size: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.link-card a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.link-card a:hover {
+  text-decoration: underline;
+}
+
+.link-list {
+  margin: 0.5rem 0 0 0;
+  padding-left: 1.25rem;
+}
+
+.link-list li {
+  margin-bottom: 0.25rem;
+}
