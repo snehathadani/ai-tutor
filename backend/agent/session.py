@@ -16,6 +16,13 @@ from lib.tutors import Tutor
 
 logger = logging.getLogger(__name__)
 
+# Upper bound for waiting on the greeting's playout so a wedged TTS pipeline
+# cannot stall run_session indefinitely.
+GREETING_PLAYOUT_TIMEOUT_S = 15.0
+# user_input_transcribed fires for every partial STT result; only keep this
+# many characters of the transcript per log line.
+_TRANSCRIPT_LOG_MAX_CHARS = 120
+
 
 def _filter_prior_messages(chat_ctx: ChatContext) -> list[Any]:
     """Keep non-system history so the new system instructions are not duplicated."""
@@ -77,6 +84,71 @@ def register_turn_persistence(
     return pending
 
 
+def register_pipeline_logging(session: lka.AgentSession) -> None:
+    """Register synchronous handlers that log the voice pipeline's lifecycle.
+
+    livekit-agents' EventEmitter rejects coroutine callbacks with ValueError,
+    so every handler is a plain function (see register_turn_persistence for
+    the asyncio.create_task pattern when async work is needed). These logs
+    make STT/LLM/TTS failures visible in the agent job log instead of silent.
+    """
+
+    def _on_user_input_transcribed(event: lka.UserInputTranscribedEvent) -> None:
+        text = event.transcript.strip()
+        if not text:
+            return
+        logger.info(
+            "User said%s: %s",
+            " (final)" if event.is_final else " (partial)",
+            text[:_TRANSCRIPT_LOG_MAX_CHARS],
+        )
+
+    def _on_error(event: lka.ErrorEvent) -> None:
+        logger.error(
+            "Pipeline error from %s: %r",
+            type(event.source).__name__ if event.source is not None else "unknown",
+            event.error,
+        )
+
+    def _on_speech_created(event: lka.SpeechCreatedEvent) -> None:
+        logger.info(
+            "TTS speaking (source=%s, user_initiated=%s)",
+            event.source,
+            event.user_initiated,
+        )
+
+    def _on_agent_state_changed(event: lka.AgentStateChangedEvent) -> None:
+        logger.info("Agent state: %s -> %s", event.old_state, event.new_state)
+
+    session.on("user_input_transcribed", _on_user_input_transcribed)
+    session.on("error", _on_error)
+    session.on("speech_created", _on_speech_created)
+    session.on("agent_state_changed", _on_agent_state_changed)
+
+
+async def speak_greeting(session: lka.AgentSession, tutor: Tutor) -> None:
+    """Speak the tutor's opening line via TTS only, with no LLM round-trip.
+
+    The greeting must be heard even when the LLM provider is unreachable, so
+    it goes straight to session.say. Playout is awaited under a timeout and
+    every failure is logged at ERROR; the session itself keeps running.
+    """
+    try:
+        handle = session.say(tutor.greeting, add_to_chat_ctx=True)
+    except Exception as exc:
+        logger.error("Failed to start greeting speech: %s", exc)
+        return
+
+    try:
+        await asyncio.wait_for(handle.wait_for_playout(), timeout=GREETING_PLAYOUT_TIMEOUT_S)
+    except Exception as exc:
+        logger.error("Greeting did not finish playing out: %s", exc)
+        return
+
+    if (exc := handle.exception()) is not None:
+        logger.error("Greeting failed: %s", exc)
+
+
 async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> None:
     session_id = ctx.room.name
     state = StateService(settings.redis_url)
@@ -118,6 +190,7 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
             session_id=session_id,
             connected=connected,
         )
+        register_pipeline_logging(session)
 
         await ctx.connect(auto_subscribe=lka.AutoSubscribe.AUDIO_ONLY)
 
@@ -129,6 +202,10 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
 
         logger.info("Starting voice session %s for tutor %s", session_id, tutor.id)
         await session.start(agent=agent, room=ctx.room)
+
+        # Greet immediately after the session is live: one short line over TTS
+        # only, so the tutor is never silent on join even when the LLM is down.
+        await speak_greeting(session, tutor)
     finally:
         try:
             await state.close()

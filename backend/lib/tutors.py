@@ -10,6 +10,9 @@ from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_GREETING = "Hi! Ready to play with some probability?"
+"""Spoken by the agent on join when the tutor YAML does not define a greeting."""
+
 
 class Reference(BaseModel):
     title: str
@@ -42,6 +45,7 @@ class Tutor(BaseModel):
     description: str
     age_range: str | None = None
     persona: str
+    greeting: str = DEFAULT_GREETING
     level_labels: dict[int, str] | None = None
     concepts: list[Concept]
     problems: list[Problem] = Field(default_factory=list)
@@ -168,6 +172,10 @@ class TutorRegistry:
 
         if not tutor.persona or not tutor.persona.strip():
             errors.append(("persona", "persona must be non-empty"))
+
+        # An explicitly blank greeting would have the agent join silently.
+        if not tutor.greeting.strip():
+            errors.append(("greeting", "greeting must be non-empty"))
 
         # At least one concept; all([]) is True, so an empty list needs an
         # explicit check.

@@ -92,7 +92,14 @@ export default function App() {
   const [invalidTutors, setInvalidTutors] = useState<{ id?: string; error: string }[]>([]);
   const [selectedTutor, setSelectedTutor] = useState<Tutor | null>(null);
   const [activeConcept, setActiveConcept] = useState<string | null>(null);
+  // Remote audio tracks currently subscribed, plus whether the browser blocked
+  // playing them (autoplay policy). The attach effect consumes the list.
+  const [remoteAudioTracks, setRemoteAudioTracks] = useState<RemoteTrack[]>([]);
+  const [audioBlocked, setAudioBlocked] = useState(false);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  // Tracks the attach effect has attached to audioElRef.current; used to detach
+  // exactly what this effect attached when a track leaves the list.
+  const attachedTracksRef = useRef<Set<RemoteTrack>>(new Set());
   const greetedRef = useRef(false);
   const permissionStreamRef = useRef<MediaStream | null>(null);
 
@@ -178,6 +185,9 @@ export default function App() {
       setTurns([]);
       setSessionEnded(false);
       setActiveConcept(null);
+      setRemoteAudioTracks([]);
+      setAudioBlocked(false);
+      setMuted(false);
 
       try {
         const res = await fetch('/api/token', {
@@ -226,6 +236,8 @@ export default function App() {
           setAgentError(null);
           setLastDispatchError(null);
           setActiveConcept(null);
+          setRemoteAudioTracks([]);
+          setAudioBlocked(false);
           greetedRef.current = false;
           // Only reached after a real connection, so summary polling is safe now.
           setSessionEnded(true);
@@ -233,14 +245,16 @@ export default function App() {
           releasePermissionStream();
         });
 
+        // Subscribed audio tracks go into state; the attach effect below owns
+        // attaching/detaching them, so a track that arrives early is never dropped.
         newRoom.on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
-          if (track.kind === Track.Kind.Audio && audioElRef.current) {
-            track.attach(audioElRef.current);
+          if (track.kind === Track.Kind.Audio) {
+            setRemoteAudioTracks((prev) => (prev.includes(track) ? prev : [...prev, track]));
           }
         });
 
         newRoom.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
-          track.detach();
+          setRemoteAudioTracks((prev) => prev.filter((t) => t !== track));
         });
 
         newRoom.on(
@@ -348,10 +362,81 @@ export default function App() {
 
   const toggleMute = useCallback(async () => {
     if (!room) return;
-    const enabled = !muted;
-    await room.localParticipant.setMicrophoneEnabled(enabled);
-    setMuted(!enabled);
+    const nextMuted = !muted;
+    try {
+      await room.localParticipant.setMicrophoneEnabled(!nextMuted);
+      // Read the real participant state so the label never drifts from the room.
+      setMuted(!room.localParticipant.isMicrophoneEnabled);
+    } catch (err) {
+      // Device failure: keep the previous mute state and surface the error.
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`Could not ${nextMuted ? 'mute' : 'unmute'} the microphone: ${message}`);
+    }
   }, [room, muted]);
+
+  // Attach every subscribed remote audio track to the hidden <audio> element
+  // whenever the track list changes. A track can arrive before the element
+  // mounts (or before the TrackSubscribed closure runs), so attaching in the
+  // handler alone can drop it; this effect re-attaches the full list instead.
+  useEffect(() => {
+    const el = audioElRef.current;
+    if (!el) return;
+
+    // Detach tracks that left the list (unsubscribe or disconnect).
+    for (const track of [...attachedTracksRef.current]) {
+      if (remoteAudioTracks.includes(track)) continue;
+      attachedTracksRef.current.delete(track);
+      try {
+        track.detach(el);
+      } catch {
+        // Room teardown may have detached it already.
+      }
+    }
+
+    for (const track of remoteAudioTracks) {
+      if (attachedTracksRef.current.has(track)) continue;
+      try {
+        track.attach(el);
+        attachedTracksRef.current.add(track);
+      } catch (err) {
+        console.warn('Could not attach remote audio track:', err);
+      }
+    }
+
+    if (remoteAudioTracks.length === 0) {
+      setAudioBlocked(false);
+      return;
+    }
+
+    let cancelled = false;
+    el.play().then(
+      () => {
+        if (!cancelled) setAudioBlocked(false);
+      },
+      () => {
+        // Autoplay was blocked until a user gesture; the "Enable sound"
+        // button retries with that gesture.
+        if (!cancelled) setAudioBlocked(true);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [remoteAudioTracks]);
+
+  const enableSound = useCallback(async () => {
+    const el = audioElRef.current;
+    if (!el) return;
+    try {
+      await el.play();
+      setAudioBlocked(false);
+    } catch {
+      // Still blocked; keep the button visible.
+      setAudioBlocked(true);
+    }
+  }, []);
+
+
 
   const handleSelectTutor = useCallback((tutor: Tutor) => {
     setSelectedTutor(tutor);
@@ -462,6 +547,17 @@ export default function App() {
           onToggleMute={toggleMute}
           onDisconnect={disconnect}
         />
+      )}
+
+      {room && audioBlocked && (
+        <div className="card">
+          <div className="form-row" style={{ justifyContent: 'space-between' }}>
+            <span className="status">Sound is blocked by your browser.</span>
+            <button type="button" className="secondary" onClick={enableSound}>
+              Enable sound
+            </button>
+          </div>
+        </div>
       )}
 
       <audio ref={audioElRef} autoPlay playsInline style={{ display: 'none' }} />
