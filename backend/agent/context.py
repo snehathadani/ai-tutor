@@ -80,6 +80,16 @@ class SessionContext:
             logger.debug("Published concept change: %s", self.current_concept)
         except Exception as exc:
             logger.warning("Failed to publish concept change: %s", exc)
+        # Persist the position so a rejoin continues this concept rather than
+        # restarting the curriculum from the first one.
+        try:
+            await self.state.set_session_meta(
+                self.tutor.id,
+                self.session_id,
+                current_concept=self.current_concept or "",
+            )
+        except Exception as exc:
+            logger.warning("Failed to persist concept position: %s", exc)
 
     async def flush_covered(self) -> None:
         """Mark the concept we just left as covered.

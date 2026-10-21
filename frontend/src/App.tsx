@@ -221,6 +221,33 @@ export default function App() {
       greetedRef.current = false;
       setSummary(null);
       setTurns([]);
+
+      // Rejoining the same room should show the earlier conversation, not a
+      // blank panel. Prepend the stored transcript; live turns append after.
+      void (async () => {
+        try {
+          const res = await fetch(
+            `/api/sessions/${encodeURIComponent(prefixedRoom)}/transcript?tutor=${encodeURIComponent(
+              tutorId
+            )}`
+          );
+          if (!res.ok) return;
+          const prior = (await res.json()) as { role?: string; text?: string; ts?: number }[];
+          const seeded: Turn[] = prior
+            .filter((t) => (t.text ?? '').trim().length > 0)
+            .map((t, i) => ({
+              id: `prior-${i}`,
+              role: t.role === 'user' ? 'user' : 'assistant',
+              text: (t.text ?? '').trim(),
+              ts: t.ts ?? Date.now(),
+            }));
+          if (seeded.length > 0) {
+            setTurns((prev) => [...seeded, ...prev]);
+          }
+        } catch {
+          // First visit to this room: nothing to restore.
+        }
+      })();
       setSessionEnded(false);
       setActiveConcept(null);
       setRemoteAudioTracks([]);

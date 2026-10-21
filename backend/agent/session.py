@@ -71,9 +71,16 @@ def register_turn_persistence(
                         text=text,
                         concept=session_ctx.current_concept,
                     )
+                except Exception as exc:
+                    logger.error("Failed to persist transcript turn: %s", exc)
+                try:
                     await state.save_chat_context(tutor.id, session_id, session.history)
                 except Exception as exc:
-                    logger.error("Failed to persist turn: %s", exc)
+                    # The transcript above is the resume source of truth; a
+                    # failed chat_ctx write only costs us the fast path.
+                    logger.error(
+                        "Failed to save chat context (transcript fallback in use): %s", exc
+                    )
 
     def _on_item(event: lka.ConversationItemAddedEvent) -> None:
         task = asyncio.create_task(_persist(event))
@@ -126,15 +133,26 @@ def register_pipeline_logging(session: lka.AgentSession) -> None:
     session.on("agent_state_changed", _on_agent_state_changed)
 
 
-async def speak_greeting(session: lka.AgentSession, tutor: Tutor) -> None:
+async def speak_greeting(
+    session: lka.AgentSession,
+    tutor: Tutor,
+    resumed: bool = False,
+    concept_label: str | None = None,
+) -> None:
     """Speak the tutor's opening line via TTS only, with no LLM round-trip.
 
     The greeting must be heard even when the LLM provider is unreachable, so
     it goes straight to session.say. Playout is awaited under a timeout and
     every failure is logged at ERROR; the session itself keeps running.
     """
+    if resumed:
+        line = "Welcome back! Let's pick up where we left off."
+        if concept_label:
+            line = f"Welcome back! Let's keep going with {concept_label}."
+    else:
+        line = tutor.greeting
     try:
-        handle = session.say(tutor.greeting, add_to_chat_ctx=True)
+        handle = session.say(line, add_to_chat_ctx=True)
     except Exception as exc:
         logger.error("Failed to start greeting speech: %s", exc)
         return
@@ -163,15 +181,43 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
 
         prior = ChatContext.empty()
         mastery: dict[str, dict[str, Any]] = {}
+        resumed_turns = 0
+        restored_concept: str | None = None
         if connected:
             try:
                 prior = await state.load_chat_context(tutor.id, session_id)
             except Exception as exc:
                 logger.error("Failed to load chat context: %s", exc)
+            resumed_turns = len(_filter_prior_messages(prior))
+            if resumed_turns == 0:
+                # chat_ctx is only a cache; the transcript is the durable
+                # record, so a rejoin can still continue the conversation.
+                try:
+                    prior = await state.build_chat_context_from_transcript(
+                        tutor.id, session_id
+                    )
+                    resumed_turns = len(_filter_prior_messages(prior))
+                except Exception as exc:
+                    logger.error("Failed to rebuild history from transcript: %s", exc)
+            try:
+                meta = await state.get_session_meta(tutor.id, session_id)
+                restored_concept = (meta.get("current_concept") or "").strip() or None
+            except Exception as exc:
+                logger.error("Failed to load session position: %s", exc)
             try:
                 mastery = await state.get_mastery(tutor.id)
             except Exception as exc:
                 logger.error("Failed to load mastery: %s", exc)
+
+        if resumed_turns:
+            logger.info(
+                "Resuming %s with %d prior turns%s",
+                session_id,
+                resumed_turns,
+                f", concept={restored_concept}" if restored_concept else "",
+            )
+        else:
+            logger.info("No prior turns for %s; starting fresh", session_id)
 
         history = _filter_prior_messages(prior)
         chat_ctx = ChatContext(items=history)
@@ -179,6 +225,9 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
         session_ctx = SessionContext(
             session_id=session_id, state=state, tutor=tutor, room=ctx.room
         )
+        if restored_concept and restored_concept in tutor.concept_by_slug:
+            session_ctx.current_concept = restored_concept
+            session_ctx._active_concept = restored_concept
         agent = build_agent(settings, tutor, session_ctx, chat_ctx, mastery=mastery)
         session = lka.AgentSession(userdata=session_ctx)
 
@@ -205,7 +254,17 @@ async def run_session(ctx: lka.JobContext, settings: Settings, tutor: Tutor) -> 
 
         # Greet immediately after the session is live: one short line over TTS
         # only, so the tutor is never silent on join even when the LLM is down.
-        await speak_greeting(session, tutor)
+        concept_label = (
+            tutor.concept_by_slug[restored_concept].label
+            if restored_concept and restored_concept in tutor.concept_by_slug
+            else None
+        )
+        await speak_greeting(
+            session,
+            tutor,
+            resumed=resumed_turns > 0,
+            concept_label=concept_label,
+        )
     finally:
         try:
             await state.close()

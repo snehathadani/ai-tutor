@@ -308,3 +308,20 @@ class StateService:
         except Exception as exc:
             logger.error("Failed to load chat context for %s/%s: %s", tutor_id, sid, exc)
             return ChatContext.empty()
+
+    async def build_chat_context_from_transcript(
+        self, tutor_id: str, sid: str
+    ) -> ChatContext:
+        """Rebuild a resume context from the durable transcript.
+
+        The chat_ctx key is only an optimisation and has proven unreliable to
+        serialise. The transcript list is written on every turn, so it is the
+        source of truth for resuming a room.
+        """
+        ctx = ChatContext.empty()
+        for turn in await self.get_transcript(tutor_id, sid):
+            role = turn.get("role")
+            text = (turn.get("text") or "").strip()
+            if role in ("user", "assistant") and text:
+                ctx.add_message(role=role, content=text)
+        return ctx
