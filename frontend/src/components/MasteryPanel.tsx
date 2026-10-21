@@ -9,6 +9,8 @@ interface Concept {
   correct: number;
   total: number;
   covered: boolean;
+  streak: number;
+  accuracy: number;
 }
 
 interface Props {
@@ -38,6 +40,40 @@ const STATE_LABELS: Record<ProgressState, string> = {
   'in-progress': 'In progress',
   'not-started': 'Not started',
 };
+
+// What the next level actually requires. These mirror _compute_level in
+// backend/lib/state.py: a streak of correct answers at a minimum accuracy.
+const NEXT_LEVEL: Record<number, { streak: number; accuracy: number; label: string }> = {
+  0: { streak: 1, accuracy: 0.5, label: 'level 1' },
+  1: { streak: 3, accuracy: 0.7, label: 'level 2' },
+  2: { streak: 5, accuracy: 0.8, label: 'level 3' },
+};
+
+function progressDetail(
+  concept: Concept,
+  state: ProgressState,
+  levelLabel: string | undefined
+): string {
+  if (state === 'not-started') return 'No questions yet';
+  if (concept.total === 0) return 'Covered, not graded yet';
+
+  // Level 0 with attempts means evidence exists but has not cleared the bar.
+  // Showing the tutor's level_labels[0] ("Not started") here would be a lie.
+  const head =
+    concept.level === 0 ? 'Level 0/3' : (levelLabel ?? `Level ${concept.level}/3`);
+  const score = `${concept.correct} of ${concept.total} correct`;
+  if (concept.level >= 3) return `${head} \u00b7 ${score}`;
+
+  const next = NEXT_LEVEL[concept.level];
+  if (!next) return `${head} \u00b7 ${score}`;
+
+  const remaining = Math.max(next.streak - concept.streak, 0);
+  const hint =
+    remaining > 0 && concept.accuracy >= next.accuracy
+      ? `${remaining} more in a row for ${next.label}`
+      : `${Math.round(next.accuracy * 100)}% or better in a row for ${next.label}`;
+  return `${head} \u00b7 ${score} \u00b7 ${hint}`;
+}
 
 export default function MasteryPanel({ tutor, activeConcept, refreshKey = 0 }: Props) {
   const [concepts, setConcepts] = useState<Concept[]>([]);
@@ -143,9 +179,7 @@ export default function MasteryPanel({ tutor, activeConcept, refreshKey = 0 }: P
               <div className="ring" style={{ '--pct': pct } as React.CSSProperties} />
               <h4>{c.label}</h4>
               <span className={`mastery-state ${state}`}>{STATE_LABELS[state]}</span>
-              <span>
-                {levelLabel ? levelLabel : `Lvl ${c.level}/3`} · {c.correct}/{c.total} correct
-              </span>
+              <span>{progressDetail(c, state, levelLabel)}</span>
             </div>
           );
         })}

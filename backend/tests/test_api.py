@@ -80,6 +80,7 @@ def test_list_tutors_includes_concepts_references_and_level_labels(client):
 
     # level_labels comes through for the mastery panel.
     assert probability["level_labels"] == {
+        "0": "Not started",
         "1": "Getting started",
         "2": "Building confidence",
         "3": "Ready to move on",

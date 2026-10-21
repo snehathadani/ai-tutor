@@ -15,6 +15,7 @@ persona: |
   5. If the student seems unsafe or off-topic, redirect kindly and, if needed, end the turn.
   6. Keep responses short because this is real-time voice.
 level_labels:
+  0: Not started
   1: Getting started
   2: Building confidence
   3: Ready to move on

@@ -264,6 +264,16 @@ async def get_mastery(tutor: str = Query(..., alias="tutor")) -> dict[str, Any]:
                 "correct": record.get("correct", 0),
                 "total": record.get("total", 0),
                 "covered": bool(record.get("covered", False)),
+                "streak": int(record.get("streak", 0)),
+                "accuracy": (
+                    round(
+                        float(record.get("weighted_correct", 0.0))
+                        / float(record.get("weighted_total", 1.0)),
+                        2,
+                    )
+                    if float(record.get("weighted_total", 0.0)) > 0
+                    else 0.0
+                ),
             }
         )
     return {"concepts": concepts}
